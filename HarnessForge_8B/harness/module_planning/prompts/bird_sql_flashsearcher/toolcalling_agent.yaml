@@ -1,0 +1,46 @@
+planning:
+  initial_plan: |-
+    You are planning a task using a FlashSearcher-style goal/path structure, with one final deliverable: the correct answer requested by the task.
+
+    Build 3 to 4 concise verification goals. Good goal types are:
+    1) ground the relevant task context
+    2) verify exact inputs, constraints, and output requirements
+    3) choose and validate candidate actions
+    4) audit the final answer against the task requirements
+
+    For each goal, provide 1 to 2 short paths.
+    Each path must include:
+    - the concrete tool action or check
+    - the success criterion
+
+    Hard planning rules:
+    - Prefer an exact-match path before any fuzzy-match path.
+    - If the task provides a mapping, note it explicitly.
+    - If no mapping is given, require tool verification instead of guessing.
+    - Do not output the final answer in this step.
+    - Keep the plan short, executable, and specific to the current task.
+
+    Output format:
+    ## Goal 1: [Goal name]
+    - Path 1.1: [Concrete approach]
+      - Success: [What must be verified]
+    - Path 1.2: [Fallback approach if needed]
+      - Success: [What must be verified]
+
+    ## Goal 2: [Goal name]
+    - Path 2.1: ...
+
+    Refrain from directly solving the task.
+  task_input: |-
+    Task:
+    {{task}}
+summary:
+  update_pre_messages: |-
+    Summarize task progress using the plan and execution history.
+    Focus on verified facts, failed assumptions, the current best answer candidate, and the next highest-value verification step.
+  update_post_messages: |-
+    Output a short structured status with these headings:
+    - verified_context_and_constraints
+    - current_best_answer_or_gap
+    - biggest_remaining_risk
+    - next_tool_actions

@@ -1,0 +1,41 @@
+planning:
+  initial_plan: |-
+    You are the planning module for VERIFIED_STATUS_PACKET.
+
+    Available tool schemas (closed set; copy names and argument keys exactly if you mention a tool):
+    {% for name, tool in tools.items() %}
+    - {{ name }}: inputs={{ tool.inputs }}; description={{ tool.description }}
+    {% endfor %}
+
+    Task:
+    {{ task }}
+
+    Create a VERIFIED_STATUS_PACKET. Combine compact obligations with only the verification rows needed by task shape: state rows, typed slots, evidence candidates, repair constraints, or raw-answer form. Avoid full tables for simple tasks.
+
+    Required fields:
+    - target
+    - obligations
+    - verified_slots_or_rows
+    - observed_success
+    - observed_failure
+    - remaining
+    - final_criteria
+
+    Keep it compact. For obvious one-hop tasks, use one pending row and one final criterion. Planned calls are not observations.
+  task_input: |-
+    Task:
+    {{ task }}
+summary:
+  update_pre_messages: |-
+    Update VERIFIED_STATUS_PACKET at step {{ step }} using only tool observations and explicit user-provided facts.
+    Verification rows close only from observations. The verifier can block or constrain, but it cannot create evidence.
+  update_post_messages: |-
+    Return a concise status update with exactly these fields:
+    - target
+    - obligations
+    - verified_slots_or_rows
+    - observed_success
+    - observed_failure
+    - remaining
+    - next_step
+    - final_readiness

@@ -1,0 +1,39 @@
+planning:
+  initial_plan: |-
+    You are the planning module for MINIMAL_BLEND.
+
+    Available tool schemas (closed set; copy names and argument keys exactly if you mention a tool):
+    {% for name, tool in tools.items() %}
+    - {{ name }}: inputs={{ tool.inputs }}; description={{ tool.description }}
+    {% endfor %}
+
+    Task:
+    {{ task }}
+
+    Create a compact status contract that Action can update from observations. Do not write executable-looking tool calls as if they already happened. Prefer task-derived rows, slots, bindings, blockers, and final criteria over long prose. If you mention a tool, copy an exact name from the Available tool schemas. Do not invent search, authentication, authorization, verification, or helper tools. Keep optional checker tools out of the plan unless they are clearly needed.
+
+    Required fields:
+    - target: concrete requested answer, state, or deliverable
+    - status_packet: pending rows, observed successes, observed failures, and remaining criteria
+    - bindings_if_needed: only variables required for dependent calls
+    - blockers_if_any: failed calls, contradictions, or missing evidence
+    - final_criteria: concise observation-backed readiness condition
+
+    Keep it short. For obvious one-hop tasks, use one pending row and one final criterion.
+  task_input: |-
+    Task:
+    {{ task }}
+summary:
+  update_pre_messages: |-
+    Update MINIMAL_BLEND at step {{ step }} using only tool observations and explicit user-provided facts.
+    Do not mark planned actions as complete. If a tool failed, classify the failure and require repaired arguments, a different valid tool, a new precondition-changing observation, or an explicit evidence-based impossibility route. If candidates or bindings conflict, keep them unresolved until decisive evidence appears.
+  update_post_messages: |-
+    Return a concise status update with exactly these fields:
+    - observed_success
+    - observed_failure
+    - bindings_or_ledger
+    - terminal_blockers
+    - remaining
+    - retry_or_repair_guidance
+    - next_step
+    - final_readiness

@@ -1,0 +1,40 @@
+planning:
+  initial_plan: |-
+    You are the planning module for CHECKPOINTED.
+
+    Available tool schemas (closed set; copy names and argument keys exactly if you mention a tool):
+    {% for name, tool in tools.items() %}
+    - {{ name }}: inputs={{ tool.inputs }}; description={{ tool.description }}
+    {% endfor %}
+
+    Task:
+    {{ task }}
+
+    Create a compact status contract for the user's task. Do not output executable-looking tool calls as if they already happened. When listing pending work, prefer plain-language operations; if you name a tool, copy an exact name from the Available tool schemas. Do not invent search, authentication, authorization, verification, or helper tool names. If the task already states the user is authorized, do not add a separate authentication pending item unless an exact schema-listed tool is required.
+    Do not output placeholders such as {task}, {target}, or {required_evidence}; use concrete words from the actual task.
+    The plan must be about solving the user's task, not about classifying the harness, policy, or tools. Keep optional checker/critic tools out of the plan unless they are clearly needed.
+
+    Required fields:
+    - target: the concrete requested answer, state, or deliverable
+    - planned_or_pending: short list of required evidence, operations, or transformations
+    - observed_success: leave empty at initialization unless already provided by the user
+    - observed_failure: leave empty at initialization unless already provided by the user
+    - remaining: what must still be observed or done
+    - final_criteria: what observation-backed condition permits final_answer or terminal completion
+
+    Keep it short. For obvious one-hop tasks, use one pending item and one final criterion.
+  task_input: |-
+    Task:
+    {{ task }}
+summary:
+  update_pre_messages: |-
+    Update the status contract at step {{ step }} using only tool observations and explicit user-provided facts.
+    Do not mark planned actions as done. If a tool failed, classify the error and propose a repaired next step using exact available tool schemas when they are visible; otherwise describe the repair in plain language without inventing tool names. If the same tool and arguments failed repeatedly, the next_step must switch to a different listed tool, repaired arguments, or alternate strategy; never recommend retrying the identical failed call unless a successful observation changed the precondition.
+  update_post_messages: |-
+    Return a concise status update with exactly these fields:
+    - observed_success
+    - observed_failure
+    - remaining
+    - retry_or_repair_guidance
+    - next_step
+    - final_readiness

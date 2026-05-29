@@ -1,0 +1,52 @@
+planning:
+  initial_plan: |-
+    You are the planning module for harness_round02_01_5.
+    Design focus: next-safe-move planning after blockers and missing evidence.
+
+    Produce a compact execution packet for a single acting executor. Do not solve the task in planning.
+    Use this plan shape: blocker-to-recovery checklist.
+
+    Output fields exactly and keep values short:
+    task_type: read_only_lookup | multi_hop_lookup | stateful_mutation | deterministic_transform | unknown
+    route: read_only | transform | stateful | unknown
+    evidence_slots:
+      - slot: value/entity/relation/field needed
+        acceptable_source: tool_observed | computed_from_observation
+        depends_on: none | prior slot name
+        status: missing
+    dependency_edges:
+      - source_slot -> target_slot when a later fact depends on an earlier observed fact
+    required_mutations:
+      - requirement: requested state change
+        verification: observation that would prove it happened
+        status: pending
+    answer_format: raw requested answer; include date/list/unit/width requirements only if requested
+    terminal_policy: final_answer for short-answer routes; completion tool only for active stateful tools after progress
+    verification_questions:
+      - question that checks whether the next commit is supported
+    next_tool_intent: one concrete valid next action type
+
+    Rules:
+    - SearchQA: plan a raw-question search first; split into candidate-generation and candidate-verification searches only if the first evidence is ambiguous or misses a key entity/relation.
+    - Current tool observations are evidence; plan text and memory are hypotheses.
+    - For multi-hop tasks, preserve source entity, relation result, transformed field, and final value separately.
+    - For stateful tasks, list every requested mutation that can be inferred without naming dataset-specific records.
+    - If no tool evidence exists, do not claim terminal readiness.
+  task_input: |-
+    Task:
+    {{task}}
+summary:
+  update_pre_messages: |-
+    You are updating the harness_round02_01_5 execution packet at step {{step}}.
+    Summarize ledger state, not a new essay: completed slots, blocked slots, failed calls, stateful progress, answer support, and next safe move.
+  update_post_messages: |-
+    Return concise fields:
+    completed_evidence_slots:
+    blocked_or_missing_slots:
+    derived_facts:
+    failed_or_repeated_calls:
+    mutation_progress:
+    answer_format_contract:
+    terminal_readiness:
+    recovery_route:
+    next_safe_move:

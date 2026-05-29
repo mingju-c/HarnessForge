@@ -1,0 +1,1691 @@
+schema_version: 2
+description: 'Compact harness pool for MATE evolution: harness design, performance
+  summary, observed issues, and evolution guidance only.'
+evaluation_context:
+  profile_id: round_00_seed_profile_partial
+  round: round_00
+  model: Qwen3-8B
+  adapter: null
+  dataset: mixeddata train prefix, partial run stopped by user
+  comparison_protocol: Use fair_first100 for cross-harness comparison; use all_available
+    for stability and cost diagnosis.
+harnesses:
+  base_harness:
+    role: baseline
+    status: active
+    tags:
+    - baseline
+    - single_executor
+    design:
+      summary: Baseline single ReAct harness with generic planning and lightweight
+        memory.
+      planning: generic_planning
+      planning_description: Minimal task framing. It relies mostly on the base model
+        to infer subgoals from the current instruction and observations, without
+        explicit periodic replanning.
+      action: single_react
+      action_description: One executor directly emits tool calls and final answers
+        in a standard ReAct loop. There is no separate critic or router.
+      memory: lightweight_memory
+      memory_description: Lightweight long-term memory can provide prior hints, but
+        the harness mainly follows the live trajectory state.
+      topology: direct_react
+      pairing_reason: fallback_single_react
+    performance:
+      status: not_profiled_in_current_round
+  harness1:
+    role: seed
+    status: seed
+    archive_tier: strong_seed
+    tags:
+    - strong_seed
+    - direct_react
+    - quality_reference
+    design:
+      summary: Direct single-executor ReAct harness with flash planning and ExpeL
+        memory.
+      planning: flash_searcher
+      planning_description: Creates a compact search-oriented plan at the start and
+        refreshes progress only when needed, keeping the task as a single serial
+        chain rather than decomposing into roles.
+      action: single_react
+      action_description: A single executor performs all real tool calls and answer
+        synthesis. This preserves continuity on multi-hop tasks but can accumulate
+        long context when recovery is weak.
+      memory: expel
+      memory_description: ExpeL-style memory stores reusable takeaways from prior
+        attempts and exposes them as soft procedural hints, not as hard constraints.
+      topology: direct_react
+      pairing_reason: fallback_single_react
+    performance:
+      comparison_slice: fair_first100
+      sample_counts:
+        envscaler: 74
+        searchqa: 14
+        toolhop: 12
+      quality:
+        mixed_primary_score: 0.5049
+        mixed_done_proxy: 0.7
+        envscaler_score: 0.5066
+        envscaler_done: 0.7703
+        toolhop_correct: 0.4167
+        toolhop_path: 0.5871
+        searchqa_subem: 0.5714
+        searchqa_used_search: 0.9286
+      efficiency:
+        avg_elapsed_time_sec: 109.87
+        avg_tokens: 198970.6
+        avg_api_calls: 19.55
+        maxstep_rate: 0.13
+      all_available_reference:
+        tasks: 371
+        mixed_primary_score: 0.5011
+        avg_elapsed_time_sec: 89.9
+        avg_tokens: 168096.2
+        maxstep_rate: 0.1078
+    strengths:
+    - strongest all-available mixed primary score among non-trivial seeds
+    - best EnvScaler score in current pool
+    - SearchQA uses search reliably
+    issues:
+    - high token cost and long wall time
+    - failures can keep accumulating long context before stopping
+    evolution_recommendations:
+    - keep the direct single-executor structure as a quality reference
+    - add tighter stop and repeated-call guards for EnvScaler failures
+    - compress observations before reflection to reduce prompt growth
+    notes: Best current quality signal; strong EnvScaler score and stable SearchQA
+      tool use, but expensive.
+  harness2:
+    role: seed
+    status: seed_modified
+    archive_tier: repair_candidate
+    tags:
+    - repair_candidate
+    - concise_reflection
+    design:
+      summary: 'Concise reflection harness: short plan, single executor, periodic
+        reflection, final verifier.'
+      planning: concise_reflection
+      planning_description: Uses a plan capped to a few lines, then triggers compact
+        reflection after fixed intervals so the model can reassess progress without
+        creating a heavy planning transcript.
+      action: concise_reflection
+      action_description: One executor controls the environment. Reflection and the
+        final verifier inspect progress, repeated failures, and answer readiness but
+        should not introduce independent tool-acting agents.
+      memory: agent_kb
+      memory_description: Agent-KB memory provides task-pattern notes and reusable
+        facts. It is useful for repeated tool schemas but can amplify mistakes if
+        bad patterns are retrieved.
+      topology: augmented_react
+      pairing_reason: fallback_single_react
+    performance:
+      comparison_slice: fair_first100
+      sample_counts:
+        envscaler: 83
+        searchqa: 8
+        toolhop: 9
+      quality:
+        mixed_primary_score: 0.3251
+        mixed_done_proxy: 0.61
+        envscaler_score: 0.3193
+        envscaler_done: 0.6627
+        toolhop_correct: 0.1111
+        toolhop_path: 0.4495
+        searchqa_subem: 0.625
+        searchqa_used_search: 1.0
+      efficiency:
+        avg_elapsed_time_sec: 76.82
+        avg_tokens: 180318.8
+        avg_api_calls: 22.13
+        maxstep_rate: 0.26
+      all_available_reference:
+        tasks: 104
+        mixed_primary_score: 0.3267
+        avg_elapsed_time_sec: 76.33
+        avg_tokens: 181201.1
+        maxstep_rate: 0.2596
+    strengths:
+    - SearchQA uses search and currently has strong small-sample subEM
+    - concise-reflection idea is simple enough for future training
+    issues:
+    - high max-step rate on EnvScaler
+    - weak ToolHop correctness
+    - repeated failed tool calls inflate runtime and tokens
+    evolution_recommendations:
+    - strengthen repetition detection after failed observations
+    - force a strategy change after two identical tool failures
+    - tighten final verifier so ToolHop does not collapse to low exact accuracy
+    notes: SearchQA signal is good, but ToolHop and EnvScaler are weak and repeated
+      failures make it slow.
+  harness3:
+    role: seed
+    status: seed_modified
+    archive_tier: diversity_seed
+    tags:
+    - diversity_seed
+    - low_token
+    - guarded
+    design:
+      summary: Guarded JoyAgent-style harness with low-token execution and MEMP memory.
+      planning: guarded_joy_agent
+      planning_description: Keeps planning terse and guard-driven. It favors early
+        commitment and bounded execution over elaborate deliberation.
+      action: guarded_joy_agent
+      action_description: Executes with tool whitelist checks, repeated-call detection,
+        and early-stop guards. The design is cheap, but may stop after shallow or
+        incomplete state updates.
+      memory: memp
+      memory_description: MEMP memory retrieves compact prior experience snippets.
+        The harness exposes memory sparingly to keep token cost low.
+      topology: augmented_react
+      pairing_reason: matched_same_name
+    performance:
+      comparison_slice: fair_first100
+      sample_counts:
+        envscaler: 77
+        searchqa: 12
+        toolhop: 11
+      quality:
+        mixed_primary_score: 0.3259
+        mixed_done_proxy: 0.78
+        envscaler_score: 0.2804
+        envscaler_done: 0.8701
+        toolhop_correct: 0.5455
+        toolhop_path: 0.5126
+        searchqa_subem: 0.4167
+        searchqa_used_search: 0.0
+      efficiency:
+        avg_elapsed_time_sec: 124.38
+        avg_tokens: 20236.0
+        avg_api_calls: 5.82
+        maxstep_rate: 0.02
+      all_available_reference:
+        tasks: 281
+        mixed_primary_score: 0.3077
+        avg_elapsed_time_sec: 119.64
+        avg_tokens: 19096.2
+        maxstep_rate: 0.0178
+    strengths:
+    - low token footprint
+    - low max-step rate
+    - high EnvScaler done rate under the fair first-100 slice
+    issues:
+    - SearchQA used_search is zero
+    - EnvScaler completion does not translate into high score
+    - some traces show no-observation loops
+    evolution_recommendations:
+    - fix SearchQA route so retrieval/search tools are mandatory when available
+    - add final state verifier before completion on EnvScaler
+    - preserve its low-token guard style as a cost-control reference
+    notes: Very token-efficient and rarely reaches max steps, but SearchQA does not
+      actually search and EnvScaler score is low.
+  harness4:
+    role: seed
+    status: seed_modified
+    archive_tier: strong_seed
+    tags:
+    - strong_seed
+    - balanced
+    - reflection_critic
+    design:
+      summary: 'Light reflection harness: short planner, single executor, non-acting
+        critic, final answer.'
+      planning: reflection_critic
+      planning_description: Starts with a short plan and relies on critic checkpoints
+        to decide whether the current route still makes sense, whether a retry is
+        needed, or whether the agent should stop.
+      action: reflection_critic
+      action_description: Only the executor is allowed to operate the environment.
+        The critic is non-acting and checks tool existence, argument plausibility,
+        repeated failures, and stopping readiness.
+      memory: agent_workflow_memory
+      memory_description: Workflow memory stores procedural lessons about successful
+        action sequences. It should bias execution strategy without overriding fresh
+        observations from the current task.
+      topology: augmented_react
+      pairing_reason: matched_same_name
+    performance:
+      comparison_slice: fair_first100
+      sample_counts:
+        envscaler: 81
+        searchqa: 9
+        toolhop: 10
+      quality:
+        mixed_primary_score: 0.3606
+        mixed_done_proxy: 0.67
+        envscaler_score: 0.3464
+        envscaler_done: 0.7284
+        toolhop_correct: 0.4
+        toolhop_path: 0.6188
+        searchqa_subem: 0.4444
+        searchqa_used_search: 1.0
+      efficiency:
+        avg_elapsed_time_sec: 66.75
+        avg_tokens: 156970.6
+        avg_api_calls: 19.6
+        maxstep_rate: 0.19
+      all_available_reference:
+        tasks: 669
+        mixed_primary_score: 0.39
+        avg_elapsed_time_sec: 47.93
+        avg_tokens: 107018.8
+        maxstep_rate: 0.0972
+    strengths:
+    - best current speed-quality balance
+    - SearchQA uses search reliably
+    - reflection critic is lighter than the original multi-expert design
+    issues:
+    - EnvScaler score still trails harness1
+    - some max-step failures remain on stateful tasks
+    evolution_recommendations:
+    - use as the default balanced parent for round-1 mutations
+    - keep critic non-acting and improve its stop/retry decisions
+    - borrow harness1's stronger direct execution discipline where useful
+    notes: 'Best balanced seed: good speed-quality tradeoff, normal SearchQA tool
+      use, and reasonable ToolHop path quality.'
+  harness5:
+    role: seed
+    status: seed
+    archive_tier: repair_candidate
+    tags:
+    - repair_candidate
+    - heavy_orchestration
+    design:
+      summary: AgentOrchestra-style multi-agent harness with heavier coordination
+        and Cerebra fusion memory.
+      planning: agentorchestra
+      planning_description: Decomposes the task through a broader orchestration plan
+        with more explicit coordination between roles or subtasks.
+      action: agentorchestra
+      action_description: Multiple role-like components can contribute to execution
+        and checking. This can improve coverage, but for the 8B model it often adds
+        handoff overhead and repeated work.
+      memory: cerebra_fusion_memory
+      memory_description: Cerebra fusion memory combines richer historical signals
+        and summaries. It can provide broad context but is expensive when exposed
+        too often.
+      topology: augmented_react
+      pairing_reason: matched_same_name
+    performance:
+      comparison_slice: fair_first100
+      sample_counts:
+        envscaler: 81
+        searchqa: 9
+        toolhop: 10
+      quality:
+        mixed_primary_score: 0.427
+        mixed_done_proxy: 0.56
+        envscaler_score: 0.4284
+        envscaler_done: 0.5926
+        toolhop_correct: 0.3
+        toolhop_path: 0.5531
+        searchqa_subem: 0.5556
+        searchqa_used_search: 1.0
+      efficiency:
+        avg_elapsed_time_sec: 102.61
+        avg_tokens: 292135.6
+        avg_api_calls: 26.26
+        maxstep_rate: 0.35
+      all_available_reference:
+        tasks: 367
+        mixed_primary_score: 0.3786
+        avg_elapsed_time_sec: 91.89
+        avg_tokens: 242097.7
+        maxstep_rate: 0.2916
+    strengths:
+    - moderate EnvScaler score despite high cost
+    - SearchQA uses search reliably
+    issues:
+    - highest token cost in the current pool
+    - highest max-step rate among active candidates
+    - multi-agent orchestration appears too heavy for Qwen3-8B
+    evolution_recommendations:
+    - shrink orchestration to one executor plus a small verifier
+    - cap reflection summaries and memory exposure
+    - avoid using this design as a direct parent unless cost is repaired
+    notes: Heavy orchestration consumes the most tokens and often reaches max steps;
+      useful mainly as a negative-cost signal.
+  harness6:
+    role: seed
+    status: seed_modified
+    archive_tier: efficiency_baseline
+    tags:
+    - efficiency_baseline
+    - low_cost
+    design:
+      summary: Guarded small-committee harness with strict budget discipline and
+        SkillWeaver memory.
+      planning: guarded_small_committee
+      planning_description: Uses a small-committee framing with tight budget limits.
+        Planning is intentionally conservative and tries to avoid long exploratory
+        branches.
+      action: guarded_small_committee
+      action_description: Applies whitelist, repeat-call, max-step, and failure guards
+        around a smaller set of acting decisions. This keeps runs cheap but can under-act
+        on stateful tasks.
+      memory: skillweaver
+      memory_description: SkillWeaver memory emphasizes reusable skills and compact
+        procedural patterns. It is suited for low-cost reuse but needs stronger task
+        verification before completion.
+      topology: augmented_react
+      pairing_reason: matched_same_name
+    performance:
+      comparison_slice: fair_first100
+      sample_counts:
+        envscaler: 71
+        searchqa: 17
+        toolhop: 12
+      quality:
+        mixed_primary_score: 0.1684
+        mixed_done_proxy: 0.23
+        envscaler_score: 0.0682
+        envscaler_done: 0.1549
+        toolhop_correct: 0.1667
+        toolhop_path: 0.471
+        searchqa_subem: 0.5882
+        searchqa_used_search: 0.0
+      efficiency:
+        avg_elapsed_time_sec: 38.01
+        avg_tokens: 13369.6
+        avg_api_calls: 5.57
+        maxstep_rate: 0.0
+      all_available_reference:
+        tasks: 901
+        mixed_primary_score: 0.1609
+        avg_elapsed_time_sec: 35.62
+        avg_tokens: 11154.9
+        maxstep_rate: 0.0
+    strengths:
+    - lowest runtime and token cost
+    - zero max-step rate in current runs
+    - useful as a minimal guard baseline
+    issues:
+    - very low EnvScaler done and score
+    - weak ToolHop correctness and path score
+    - SearchQA does not use search
+    evolution_recommendations:
+    - do not use as a main quality parent
+    - reuse its budget discipline in stronger harnesses
+    - add mandatory retrieval route before any SearchQA reuse
+    notes: Fastest and cheapest, but quality is too low; keep as a low-cost baseline
+      and guard/reference source.
+  harness7:
+    role: seed
+    status: seed_modified
+    archive_tier: diversity_seed
+    tags:
+    - diversity_seed
+    - router_debate
+    design:
+      summary: Router/debate harness for read-only tasks with stateful fallback to
+        single executor plus critic.
+      planning: router_debate
+      planning_description: Routes the task first. Read-only retrieval/QA tasks may
+        use independent solvers and a judge, while stateful tasks should follow a
+        single-executor plan.
+      action: router_debate
+      action_description: Debate is restricted to non-mutating tasks. For API-bank or
+        EnvScaler-style environments, the harness should avoid parallel actors and
+        use one executor plus a critic to protect state.
+      memory: dynamic_cheatsheet
+      memory_description: Dynamic cheatsheet memory records concise task heuristics
+        and route decisions. It is useful for selecting search/debate/fallback modes
+        but must not encode dataset-specific labels.
+      topology: augmented_react
+      pairing_reason: flash_goals_direct_parallel_agents
+    performance:
+      comparison_slice: fair_first100
+      sample_counts:
+        envscaler: 76
+        searchqa: 12
+        toolhop: 12
+      quality:
+        mixed_primary_score: 0.3898
+        mixed_done_proxy: 0.63
+        envscaler_score: 0.355
+        envscaler_done: 0.6711
+        toolhop_correct: 0.5
+        toolhop_path: 0.4448
+        searchqa_subem: 0.5
+        searchqa_used_search: 1.0
+      efficiency:
+        avg_elapsed_time_sec: 101.79
+        avg_tokens: 198725.5
+        avg_api_calls: 22.09
+        maxstep_rate: 0.26
+      all_available_reference:
+        tasks: 418
+        mixed_primary_score: 0.3425
+        avg_elapsed_time_sec: 80.39
+        avg_tokens: 149986.5
+        maxstep_rate: 0.1722
+    strengths:
+    - SearchQA uses search reliably
+    - fair first-100 ToolHop correctness is strong
+    - router/debate gives useful architectural diversity
+    issues:
+    - EnvScaler max-step rate is high
+    - all-available ToolHop score drops after more samples
+    - stateful fallback still needs stronger stop and verifier rules
+    evolution_recommendations:
+    - preserve debate only for read-only retrieval tasks
+    - make stateful route single-executor with stricter critic stop rules
+    - add route-level cost budget and repeated-call abort
+    notes: Router/debate has useful SearchQA behavior and good early ToolHop signal,
+      but stateful tasks still run long.
+
+  harness_round01_1:
+    role: round01_candidate
+    status: evaluated
+    archive_tier: diversity_seed
+    tags:
+    - round01
+    - observation_ledger
+    - direct_react
+    - toolhop_positive
+    design:
+      summary: Single executor with an observation-grounded work ledger, soft schema/retry
+        guidance, and lightweight preflight critic.
+      planning: round01_ledger_planning
+      planning_description: Builds an OBSERVED_LEDGER contract with target, pending
+        items, observed evidence, remaining work, and final criteria. The plan is
+        treated as intent only, so planned calls should not become facts before a
+        successful observation.
+      action: round01_ledger_react
+      action_description: One executor maintains a compact ledger of requirements,
+        successful observations, failed observations, remaining work, and final
+        criteria. The optional ledger_preflight helper is advisory and should not
+        block valid direct tool execution.
+      memory: round01_observed_memory
+      memory_description: Phase-aware memory returns procedural reminders while
+        avoiding contamination from planned-but-unobserved actions.
+      topology: direct_react
+      pairing_reason: round01_base_evolution_observation_grounding
+    performance:
+      comparison_slice: fair_first200
+      sample_counts:
+        envscaler: 110
+        searchqa: 52
+        toolhop: 38
+      quality:
+        mixed_primary_score: 0.4662
+        mixed_done_proxy: 0.59
+        envscaler_score: 0.484
+        envscaler_done: 0.6909
+        toolhop_correct: 0.4737
+        toolhop_path: 0.5263
+        searchqa_subem: 0.4615
+        searchqa_used_search: 1.0
+      efficiency:
+        avg_elapsed_time_sec: 292.9
+        avg_tokens: 121275.9
+        avg_api_calls: 14.17
+        maxstep_rate: 0.145
+      all_available_reference:
+        tasks: 200
+        mixed_primary_score: 0.4662
+        avg_elapsed_time_sec: 292.9
+        avg_tokens: 121275.9
+        maxstep_rate: 0.145
+    strengths:
+    - best fair-first200 ToolHop score after harness_round01_8
+    - observation ledger improves ToolHop over the base harness
+    - SearchQA consistently uses search
+    issues:
+    - below base on overall mixed score
+    - SearchQA is weak compared with stronger round01 candidates
+    - high token cost and non-trivial max-step rate
+    evolution_recommendations:
+    - keep the observation-grounded ledger idea as a diversity source
+    - reduce repeated EnvScaler and ToolHop failure loops
+    - strengthen answer binding for SearchQA before using as a parent
+    notes: Fair-first200 score is close to base, with useful ToolHop behavior but
+      weak SearchQA and high cost.
+  harness_round01_2:
+    role: round01_candidate
+    status: evaluated
+    archive_tier: strong_seed
+    tags:
+    - round01
+    - evidence_chain
+    - stable_candidate
+    - selected_top4
+    design:
+      summary: QA-oriented single executor with explicit evidence slots, observation
+        arbitration, and answer support checks.
+      planning: round01_evidence_chain_planning
+      planning_description: Builds an EVIDENCE_CHAIN contract with target answer
+        type, pending evidence, observed evidence, remaining hops, and final criteria
+        so lookup tasks keep answer candidates tied to observations.
+      action: round01_evidence_chain_react
+      action_description: One executor binds every lookup or ToolHop answer to observed
+        evidence and can use observe_arbitrate only when a candidate remains genuinely
+        ambiguous after task-tool observations.
+      memory: round01_evidence_memory
+      memory_description: Phase-aware evidence memory provides procedural reminders
+        without storing planned calls as facts.
+      topology: direct_react
+      pairing_reason: round01_base_evolution_evidence_chain
+    performance:
+      comparison_slice: fair_first200
+      sample_counts:
+        envscaler: 110
+        searchqa: 52
+        toolhop: 38
+      quality:
+        mixed_primary_score: 0.4822
+        mixed_done_proxy: 0.63
+        envscaler_score: 0.4995
+        envscaler_done: 0.7364
+        toolhop_correct: 0.4474
+        toolhop_path: 0.4737
+        searchqa_subem: 0.5385
+        searchqa_used_search: 1.0
+      efficiency:
+        avg_elapsed_time_sec: 268.77
+        avg_tokens: 110816.5
+        avg_api_calls: 13.46
+        maxstep_rate: 0.105
+      all_available_reference:
+        tasks: 1242
+        mixed_primary_score: 0.4723
+        avg_elapsed_time_sec: 290.42
+        avg_tokens: 109606.4
+        maxstep_rate: 0.1264
+    strengths:
+    - positive fair-first200 delta over base
+    - stable full-run mixed score among round01 candidates
+    - SearchQA uses search and improves subEM over base
+    issues:
+    - lower fair-first200 score than harness_round01_5 and harness_round01_6
+    - ToolHop correctness does not improve over base
+    - still reaches max steps on roughly one tenth of aligned tasks
+    evolution_recommendations:
+    - keep as a stable evidence-chain parent for future mutations
+    - borrow harness_round01_6's stronger EnvScaler completion discipline
+    - add ToolHop-specific transformation checks before final_answer
+    notes: 'Good balanced candidate: selected for the top-4 comparison and remains
+      comparatively stable over the full 1242-task run.'
+  harness_round01_3:
+    role: round01_candidate
+    status: evaluated
+    archive_tier: repair_candidate
+    tags:
+    - round01
+    - repair_controller
+    - schema_repair
+    design:
+      summary: Single executor focused on schema-aware repair, soft duplicate-failure
+        advisories, and strategy changes after tool errors.
+      planning: round01_repair_planning
+      planning_description: Builds a REPAIR_CONTROLLER plan with target, pending
+        items, observed evidence, remaining work, and final criteria, emphasizing
+        explicit failure classification before retry.
+      action: round01_repair_react
+      action_description: The executor classifies failed calls as unknown tool, schema
+        mismatch, missing entity, empty output, execution error, or contradiction,
+        then prefers repaired arguments or alternate valid tools over blind retry.
+      memory: round01_repair_memory
+      memory_description: Phase-aware repair memory supplies procedural hints for
+        schema repair while keeping observed state separate from planned actions.
+      topology: direct_react
+      pairing_reason: round01_base_evolution_schema_repair
+    performance:
+      comparison_slice: fair_first200
+      sample_counts:
+        envscaler: 110
+        searchqa: 52
+        toolhop: 38
+      quality:
+        mixed_primary_score: 0.4434
+        mixed_done_proxy: 0.575
+        envscaler_score: 0.4608
+        envscaler_done: 0.6545
+        toolhop_correct: 0.3684
+        toolhop_path: 0.3947
+        searchqa_subem: 0.5577
+        searchqa_used_search: 1.0
+      efficiency:
+        avg_elapsed_time_sec: 297.27
+        avg_tokens: 121176.7
+        avg_api_calls: 14.19
+        maxstep_rate: 0.175
+      all_available_reference:
+        tasks: 200
+        mixed_primary_score: 0.4434
+        avg_elapsed_time_sec: 297.27
+        avg_tokens: 121176.7
+        maxstep_rate: 0.175
+    strengths:
+    - strongest SearchQA subEM among non-selected weaker candidates
+    - explicit schema-repair idea is useful for future failure handling
+    - SearchQA uses search reliably
+    issues:
+    - lowest fair-first200 ToolHop score among round01 candidates
+    - high max-step rate and high token cost
+    - negative overall delta against base
+    evolution_recommendations:
+    - keep repair classification but make it trigger earlier and cheaper
+    - add a hard strategy switch after repeated failed repairs
+    - avoid direct use as a quality parent until ToolHop recovers
+    notes: Repair logic is conceptually useful, but the current implementation is
+      too costly and underperforms overall.
+  harness_round01_4:
+    role: round01_candidate
+    status: evaluated
+    archive_tier: repair_candidate
+    tags:
+    - round01
+    - checkpoint_critic
+    - direct_react
+    design:
+      summary: Checkpointed direct executor with frequent concise summaries and a
+        non-acting critic for stop/repair decisions.
+      planning: round01_checkpoint_planning
+      planning_description: Builds a CHECKPOINTED plan that separates target, pending
+        items, observed evidence, remaining work, and final criteria before handing
+        off to direct execution.
+      action: round01_checkpoint_react
+      action_description: One executor acts directly while checkpoint_critic is used
+        only at real uncertainty points to review known facts, missing facts, repeated
+        failures, and final readiness.
+      memory: round01_checkpoint_memory
+      memory_description: Phase-aware checkpoint memory gives procedural reminders
+        without converting plan text into observed state.
+      topology: augmented_react
+      pairing_reason: round01_base_evolution_checkpoint_critic
+    performance:
+      comparison_slice: fair_first200
+      sample_counts:
+        envscaler: 110
+        searchqa: 52
+        toolhop: 38
+      quality:
+        mixed_primary_score: 0.4444
+        mixed_done_proxy: 0.6
+        envscaler_score: 0.467
+        envscaler_done: 0.7182
+        toolhop_correct: 0.4474
+        toolhop_path: 0.4474
+        searchqa_subem: 0.4615
+        searchqa_used_search: 1.0
+      efficiency:
+        avg_elapsed_time_sec: 287.85
+        avg_tokens: 118303.1
+        avg_api_calls: 14.12
+        maxstep_rate: 0.13
+      all_available_reference:
+        tasks: 200
+        mixed_primary_score: 0.4444
+        avg_elapsed_time_sec: 287.85
+        avg_tokens: 118303.1
+        maxstep_rate: 0.13
+    strengths:
+    - non-acting critic preserves the single-executor state discipline
+    - EnvScaler done rate is reasonable for a weaker candidate
+    - SearchQA uses search reliably
+    issues:
+    - weak SearchQA and overall mixed score
+    - no clear benchmark specialty versus other round01 candidates
+    - checkpointing does not lower cost enough
+    evolution_recommendations:
+    - merge only the lightweight checkpoint prompts into stronger parents
+    - make critic calls rarer and more decisive
+    - improve SearchQA answer support before further use
+    notes: The checkpoint critic is architecturally clean, but the measured quality
+      does not justify using this candidate as a main parent.
+  harness_round01_5:
+    role: round01_candidate
+    status: evaluated
+    archive_tier: strong_seed
+    tags:
+    - round01
+    - commit_ledger
+    - searchqa_best
+    - selected_top4
+    design:
+      summary: Stateful-task specialist with sequential commit discipline, read-after-write
+        reminders, and terminal preflight.
+      planning: round01_commit_planning
+      planning_description: Builds a COMMIT_LEDGER plan with target, pending items,
+        observed evidence, remaining work, and final criteria, emphasizing verified
+        state changes before claiming completion.
+      action: round01_commit_react
+      action_description: For mutable tools, the executor performs state-changing
+        calls sequentially, observes results, and uses commit_preflight only as an
+        optional readiness check before terminal completion.
+      memory: round01_commit_memory
+      memory_description: Phase-aware commit memory keeps procedural state-change
+        reminders separate from factual observations.
+      topology: direct_react
+      pairing_reason: round01_base_evolution_stateful_commit
+    performance:
+      comparison_slice: fair_first200
+      sample_counts:
+        envscaler: 110
+        searchqa: 52
+        toolhop: 38
+      quality:
+        mixed_primary_score: 0.4945
+        mixed_done_proxy: 0.65
+        envscaler_score: 0.5036
+        envscaler_done: 0.7455
+        toolhop_correct: 0.4474
+        toolhop_path: 0.5
+        searchqa_subem: 0.5962
+        searchqa_used_search: 1.0
+      efficiency:
+        avg_elapsed_time_sec: 281.42
+        avg_tokens: 116349.8
+        avg_api_calls: 14.17
+        maxstep_rate: 0.125
+      all_available_reference:
+        tasks: 1242
+        mixed_primary_score: 0.4732
+        avg_elapsed_time_sec: 299.73
+        avg_tokens: 117116.4
+        maxstep_rate: 0.1457
+    strengths:
+    - best fair-first200 SearchQA score among round01 candidates
+    - second-best fair-first200 mixed score
+    - strong complementarity in the selected top-4 oracle comparison
+    issues:
+    - full 1242-task score drops behind harness_round01_6 and harness_round01_8
+    - ToolHop correctness is only moderate
+    - cost and max-step rate remain high
+    evolution_recommendations:
+    - use as the SearchQA-specialist parent or ensemble member
+    - combine commit discipline with harness_round01_6's answer canonicalization
+    - tighten repeated-call repair on stateful tasks before scaling
+    notes: Strong fair-slice candidate and best SearchQA signal, but weaker full-run
+      stability than harness_round01_6.
+  harness_round01_6:
+    role: round01_candidate
+    status: evaluated
+    archive_tier: strong_seed
+    tags:
+    - round01
+    - round01_winner
+    - canonical_answer
+    - selected_top4
+    design:
+      summary: Answer-focused single executor with target-type planning, final observation
+        binding, and cautious canonicalization.
+      planning: round01_canonical_planning
+      planning_description: Builds a CANONICAL_TARGET plan that records target answer
+        type, pending items, observed evidence, remaining work, and final criteria
+        before execution.
+      action: round01_canonical_react
+      action_description: Before final_answer, the executor identifies the requested
+        answer type and binds the answer to an exact observation, normalizing only
+        when the task asks for a date, number, unit, name, list, capitalization, or
+        raw value.
+      memory: round01_canonical_memory
+      memory_description: Phase-aware canonicalization memory reminds the executor
+        to copy decisive observed fields exactly without treating planned calls as
+        facts.
+      topology: direct_react
+      pairing_reason: round01_base_evolution_answer_canonicalization
+    performance:
+      comparison_slice: fair_first200
+      sample_counts:
+        envscaler: 110
+        searchqa: 52
+        toolhop: 38
+      quality:
+        mixed_primary_score: 0.4983
+        mixed_done_proxy: 0.66
+        envscaler_score: 0.5105
+        envscaler_done: 0.8
+        toolhop_correct: 0.4737
+        toolhop_path: 0.5
+        searchqa_subem: 0.5
+        searchqa_used_search: 1.0
+      efficiency:
+        avg_elapsed_time_sec: 264.97
+        avg_tokens: 107282.8
+        avg_api_calls: 13.19
+        maxstep_rate: 0.095
+      all_available_reference:
+        tasks: 1242
+        mixed_primary_score: 0.4949
+        avg_elapsed_time_sec: 277.85
+        avg_tokens: 106522.5
+        maxstep_rate: 0.1208
+    strengths:
+    - best fair-first200 mixed score among round01 candidates
+    - best EnvScaler score and done proxy on the fair slice
+    - lowest fair-slice max-step rate and lowest token cost among top round01 candidates
+    issues:
+    - SearchQA trails harness_round01_5
+    - ToolHop is solid but not the best round01 ToolHop candidate
+    - full-run max-step rate still needs improvement
+    evolution_recommendations:
+    - use as the primary round01 parent for next-round mutations
+    - add harness_round01_5's SearchQA evidence discipline
+    - add harness_round01_8's ToolHop status-packet behavior selectively
+    notes: Best overall round01 candidate and the cleanest quality-cost tradeoff
+      across aligned and full-run results.
+  harness_round01_7:
+    role: round01_candidate
+    status: evaluated
+    archive_tier: diversity_seed
+    tags:
+    - round01
+    - mutability_route
+    - low_tool_calls
+    design:
+      summary: Schema-routed single executor where read-only tasks may gather limited
+        independent evidence while mutable tasks use sequential commits.
+      planning: round01_mutability_planning
+      planning_description: Builds a MUTABILITY_ROUTE plan with target, pending items,
+        observed evidence, remaining work, and final criteria, then routes execution
+        by whether tools appear read-only or state-changing.
+      action: round01_mutability_react
+      action_description: The executor classifies tools by schema and behavior; read-only
+        lookup can collect limited independent evidence, while mutable tools require
+        sequential observation before completion. Debate is avoided.
+      memory: round01_mutability_memory
+      memory_description: Phase-aware mutability memory provides routing reminders
+        while keeping current observations authoritative.
+      topology: augmented_react
+      pairing_reason: round01_base_evolution_mutability_route
+    performance:
+      comparison_slice: fair_first200
+      sample_counts:
+        envscaler: 110
+        searchqa: 52
+        toolhop: 38
+      quality:
+        mixed_primary_score: 0.4707
+        mixed_done_proxy: 0.615
+        envscaler_score: 0.4832
+        envscaler_done: 0.7091
+        toolhop_correct: 0.4474
+        toolhop_path: 0.4737
+        searchqa_subem: 0.5385
+        searchqa_used_search: 1.0
+      efficiency:
+        avg_elapsed_time_sec: 278.05
+        avg_tokens: 113986.6
+        avg_api_calls: 13.74
+        maxstep_rate: 0.135
+      all_available_reference:
+        tasks: 200
+        mixed_primary_score: 0.4707
+        avg_elapsed_time_sec: 278.05
+        avg_tokens: 113986.6
+        maxstep_rate: 0.135
+    strengths:
+    - slightly positive overall delta over base
+    - low SearchQA and ToolHop tool-call counts among round01 candidates
+    - mutability routing adds useful architectural diversity
+    issues:
+    - no benchmark-leading quality signal
+    - EnvScaler score is close to base rather than clearly improved
+    - max-step rate remains above harness_round01_6
+    evolution_recommendations:
+    - preserve mutability routing as a lightweight module idea
+    - combine with canonical answer binding from harness_round01_6
+    - add stronger stateful completion checks before promoting
+    notes: Useful routing diversity with modest gains, but not strong enough as a
+      main parent on current evidence.
+  harness_round01_8:
+    role: round01_candidate
+    status: evaluated
+    archive_tier: strong_seed
+    tags:
+    - round01
+    - status_packet
+    - toolhop_best
+    - selected_top4
+    design:
+      summary: Status-packet harness that keeps a compact plan/action/memory contract
+        separating pending intent from observed facts.
+      planning: round01_status_packet_planning
+      planning_description: Builds a STATUS_PACKET with target, planned_or_pending,
+        observed_success, observed_failure, remaining, next step, and final criteria,
+        keeping pending intent separate from evidence.
+      action: round01_status_packet_react
+      action_description: One executor carries a compact status packet and updates
+        it only from observations. The optional status_packet_check is advisory and
+        should not block clear valid tool execution.
+      memory: round01_status_packet_memory
+      memory_description: Phase-aware status-packet memory reminds the executor that
+        planned items remain pending until observations close them.
+      topology: direct_react
+      pairing_reason: round01_base_evolution_status_packet
+    performance:
+      comparison_slice: fair_first200
+      sample_counts:
+        envscaler: 110
+        searchqa: 52
+        toolhop: 38
+      quality:
+        mixed_primary_score: 0.4612
+        mixed_done_proxy: 0.605
+        envscaler_score: 0.4568
+        envscaler_done: 0.6818
+        toolhop_correct: 0.5263
+        toolhop_path: 0.5526
+        searchqa_subem: 0.5
+        searchqa_used_search: 1.0
+      efficiency:
+        avg_elapsed_time_sec: 290.6
+        avg_tokens: 119100.7
+        avg_api_calls: 14.15
+        maxstep_rate: 0.155
+      all_available_reference:
+        tasks: 1242
+        mixed_primary_score: 0.4876
+        avg_elapsed_time_sec: 305.76
+        avg_tokens: 117185.6
+        maxstep_rate: 0.1514
+    strengths:
+    - best fair-first200 ToolHop score among round01 candidates
+    - strong full-run mixed score, second only to harness_round01_6
+    - useful status-packet discipline for separating intent from evidence
+    issues:
+    - weak fair-first200 EnvScaler and SearchQA performance
+    - highest max-step rate among selected top-4 candidates
+    - expensive relative to harness_round01_6
+    evolution_recommendations:
+    - use as a ToolHop-specialist parent or ensemble member
+    - borrow harness_round01_6's EnvScaler completion and cost discipline
+    - make status_packet_check rarer and more decisive
+    notes: Best ToolHop specialist and strong full-run fallback, but weaker on the
+      fair aligned slice outside ToolHop.
+
+  harness_round02_01_1:
+    role: round02_candidate
+    status: generated
+    archive_tier: pending_evaluation
+    tags:
+    - round02
+    - round02_01
+    - parent_round01_6
+    - observed_ledger
+    - canonical_answer
+    - direct_react
+    design:
+      summary: Balanced observed-ledger canonical executor that preserves the round01_6
+        single ReAct actor while adding compact ledger/status tracking, bounded
+        failure repair reminders, optional readiness checking, and raw final-answer
+        binding.
+      planning: round02_01_observed_ledger_planning
+      planning_description: Emits an OBSERVED_LEDGER contract that separates pending
+        rows, observed successes, observed failures, typed slots, remaining work,
+        and final criteria so planned actions do not become facts before observation.
+      action: round02_01_observed_ledger_react
+      action_description: A single executor acts directly and may call ledger_readiness_check
+        only when unresolved rows, repeated failures, or raw-answer support are
+        genuinely ambiguous.
+      memory: round02_01_observed_ledger_memory
+      memory_description: Phase-aware repair reminders trigger around failures,
+        terminal-risk states, and raw-value availability without storing task facts.
+      topology: direct_react
+      pairing_reason: round02_observation_ledger_canonical
+    performance:
+      status: not_evaluated
+    strengths:
+    - keeps the round01_6 direct executor and canonical answer discipline
+    - makes observed versus pending state explicit
+    - adds a bounded readiness check without turning it into a second actor
+    issues:
+    - ledger updates may add overhead on easy tasks
+    - readiness checks need evaluation to confirm they stay rare
+    evolution_recommendations:
+    - evaluate as the balanced round02_01 baseline
+    - compare raw-answer accuracy and max-step rate against harness_round01_6
+    - watch for overuse of ledger_readiness_check
+    notes: Generated round02_01 candidate evolved from harness_round01_6; no benchmark
+      metrics recorded yet.
+
+  harness_round02_01_2:
+    role: round02_candidate
+    status: generated
+    archive_tier: pending_evaluation
+    tags:
+    - round02
+    - round02_01
+    - parent_round01_6
+    - repair_ledger
+    - schema_repair
+    - direct_react
+    design:
+      summary: Repair-first ledger executor that keeps the winner single ReAct actor
+        while making repeated failures, bad IDs, missing entities, and precondition
+        changes explicit before retry.
+      planning: round02_01_repair_ledger_planning
+      planning_description: Emits a REPAIR_LEDGER contract that tracks pending rows,
+        last failure, changed preconditions, repaired arguments, and final criteria.
+      action: round02_01_repair_ledger_react
+      action_description: A single executor performs task actions and can use repair_triage_check
+        to classify failure type and verify that the next retry changes something
+        meaningful.
+      memory: round02_01_repair_ledger_memory
+      memory_description: Error-phase reminders trigger on repeated failures, bad
+        IDs, and stale-placeholder risk without treating memory as factual evidence.
+      topology: direct_react
+      pairing_reason: round02_bounded_repair_ledger
+    performance:
+      status: not_evaluated
+    strengths:
+    - targets repeated failed tool calls directly
+    - keeps repair classification inside a single-executor flow
+    - emphasizes observed arguments and schema-listed alternatives
+    issues:
+    - repair bookkeeping can be expensive if invoked too often
+    - needs evidence that it improves EnvScaler and ToolHop without hurting SearchQA
+    evolution_recommendations:
+    - profile repeated-call reduction and max-step rate
+    - enforce strategy changes only after observed failure patterns
+    - compare cost against round01 repair candidates
+    notes: Generated round02_01 repair specialist evolved from harness_round01_6;
+      no benchmark metrics recorded yet.
+
+  harness_round02_01_3:
+    role: round02_candidate
+    status: generated
+    archive_tier: pending_evaluation
+    tags:
+    - round02
+    - round02_01
+    - parent_round01_6
+    - evidence_arbitration
+    - retrieval
+    - direct_react
+    design:
+      summary: Retrieval-arbitration specialist that preserves direct execution while
+        adding explicit target, predicate, title, answer-type, and distractor checks
+        before final_answer.
+      planning: round02_01_evidence_arbitration_planning
+      planning_description: Emits an EVIDENCE_ARBITER contract recording target or
+        title, predicate, answer type, candidate evidence, rejected distractors, and
+        final criteria.
+      action: round02_01_evidence_arbitration_react
+      action_description: A single executor acts directly and may use evidence_arbitration_check
+        only for ambiguous retrieval results or near-match finalization risks.
+      memory: round02_01_evidence_arbitration_memory
+      memory_description: Distractor-aware procedural reminders encourage query changes
+        and raw supported output without storing task facts or answer candidates.
+      topology: direct_react
+      pairing_reason: round02_retrieval_evidence_arbitration
+    performance:
+      status: not_evaluated
+    strengths:
+    - targets SearchQA candidate confusion and near-match answers
+    - binds final answers to observed evidence
+    - keeps debate and parallel actors out of stateful tasks
+    issues:
+    - retrieval checks may be unnecessary overhead outside read-only QA
+    - ToolHop and EnvScaler effects are unknown until evaluation
+    evolution_recommendations:
+    - evaluate SearchQA subEM and used-search behavior first
+    - ensure evidence_arbitration_check stays rare on stateful tasks
+    - combine with raw-answer binding if retrieval quality improves
+    notes: Generated round02_01 retrieval specialist evolved from harness_round01_6;
+      no benchmark metrics recorded yet.
+
+  harness_round02_01_4:
+    role: round02_candidate
+    status: generated
+    archive_tier: pending_evaluation
+    tags:
+    - round02
+    - round02_01
+    - parent_round01_6
+    - slot_chain
+    - toolhop
+    - direct_react
+    design:
+      summary: Typed slot-chain executor for ToolHop-like failures, requiring observed
+        prerequisite slots before relation traversal, extraction, arithmetic, date,
+        or string transformation.
+      planning: round02_01_slot_chain_planning
+      planning_description: Emits a SLOT_CHAIN_LEDGER contract that derives typed
+        slots from the task and tracks prerequisites, observed bindings, unresolved
+        slots, and final criteria.
+      action: round02_01_slot_chain_react
+      action_description: A single executor performs the chain and can call slot_chain_check
+        when missing or placeholder slots threaten a downstream transformation.
+      memory: round02_01_slot_chain_memory
+      memory_description: Placeholder-safe reminders trigger on unresolved slots and
+        raw/transformed value risk while keeping observations authoritative.
+      topology: direct_react
+      pairing_reason: round02_typed_slot_chain
+    performance:
+      status: not_evaluated
+    strengths:
+    - directly targets ToolHop prerequisite and transformation failures
+    - separates raw observed values from derived values
+    - keeps the check advisory and non-environmental
+    issues:
+    - slot ledgers may overfit read-only multi-hop tasks
+    - stateful-task benefit is uncertain
+    evolution_recommendations:
+    - evaluate ToolHop correctness and path quality
+    - check whether slot_chain_check increases token cost
+    - merge selectively with raw final-binding if ToolHop improves
+    notes: Generated round02_01 ToolHop specialist evolved from harness_round01_6;
+      no benchmark metrics recorded yet.
+
+  harness_round02_01_5:
+    role: round02_candidate
+    status: generated
+    archive_tier: pending_evaluation
+    tags:
+    - round02
+    - round02_01
+    - parent_round01_6
+    - stateful_commit
+    - envscaler
+    - direct_react
+    design:
+      summary: Stateful commit specialist for EnvScaler-like multi-operation workflows,
+        using compact observed commit rows and optional terminal readiness checking.
+      planning: round02_01_stateful_commit_planning
+      planning_description: Emits a STATEFUL_COMMIT_LEDGER with one row per required
+        mutation or verification, keeping target IDs, write status, read-after-write
+        checks, and final criteria explicit.
+      action: round02_01_stateful_commit_react
+      action_description: A single executor applies sequential observed commits and
+        can use commit_readiness_check to audit complete_task readiness without acting
+        in the environment.
+      memory: round02_01_stateful_commit_memory
+      memory_description: Read-after-write reminders reinforce target-ID binding and
+        keep failed writes open until a successful observation closes them.
+      topology: direct_react
+      pairing_reason: round02_stateful_commit_readiness
+    performance:
+      status: not_evaluated
+    strengths:
+    - targets stateful EnvScaler completion discipline
+    - emphasizes sequential mutation and verification
+    - preserves single-executor state ownership
+    issues:
+    - may add unnecessary commit bookkeeping on read-only tasks
+    - terminal-readiness checks need throttling evidence
+    evolution_recommendations:
+    - evaluate EnvScaler score, done proxy, and max-step rate
+    - inspect failed write recovery traces
+    - keep read-only paths lightweight if promoted
+    notes: Generated round02_01 stateful specialist evolved from harness_round01_6;
+      no benchmark metrics recorded yet.
+
+  harness_round02_01_6:
+    role: round02_candidate
+    status: generated
+    archive_tier: pending_evaluation
+    tags:
+    - round02
+    - round02_01
+    - parent_round01_6
+    - raw_answer
+    - canonical_answer
+    - direct_react
+    design:
+      summary: Raw final-binding specialist that strengthens round01_6 canonicalization
+        by making exact raw-field copying the central contract for machine-graded
+        short answers.
+      planning: round02_01_raw_answer_planning
+      planning_description: Emits a RAW_ANSWER_CONTRACT recording requested answer
+        type, decisive observation, raw field, allowed transformation, and final
+        criteria.
+      action: round02_01_raw_answer_react
+      action_description: A single executor acts normally and uses raw_answer_check
+        only when final-answer support or output format is risky.
+      memory: round02_01_raw_answer_memory
+      memory_description: Raw-copy reminders trigger around structured values and
+        final_answer risk without storing benchmark facts or expected answers.
+      topology: direct_react
+      pairing_reason: round02_raw_final_binding
+    performance:
+      status: not_evaluated
+    strengths:
+    - reinforces the strongest round01 answer-canonicalization behavior
+    - targets date, number, unit, ID, and short-value grading errors
+    - keeps final checking narrow and observation-bound
+    issues:
+    - may not repair multi-step exploration failures
+    - could under-help stateful tasks where writes are the main risk
+    evolution_recommendations:
+    - evaluate SearchQA subEM and ToolHop final exactness
+    - compare against harness_round01_6 on raw-value copy errors
+    - combine with stateful commit only if answer binding is the limiting factor
+    notes: Generated round02_01 finalization specialist evolved from harness_round01_6;
+      no benchmark metrics recorded yet.
+
+  harness_round02_01_7:
+    role: round02_candidate
+    status: generated
+    archive_tier: pending_evaluation
+    tags:
+    - round02
+    - round02_01
+    - parent_round01_6
+    - recovery_status
+    - terminal_contract
+    - direct_react
+    design:
+      summary: Recovery and terminal-contract specialist that reduces empty actions,
+        premature unavailable answers, and no-terminal endings while preserving the
+        single executor.
+      planning: round02_01_recovery_status_planning
+      planning_description: Emits a RECOVERY_STATUS contract that tracks failed route,
+        changed strategy, remaining route, terminal criteria, and impossible-state
+        evidence.
+      action: round02_01_recovery_status_react
+      action_description: A single executor performs tool calls and can use recovery_contract_check
+        to audit impossible or terminal claims only at risk points.
+      memory: round02_01_recovery_status_memory
+      memory_description: Stuck-state reminders trigger on errors, no-observation
+        risk, and cannot-determine phrasing without adding task-specific facts.
+      topology: direct_react
+      pairing_reason: round02_recovery_terminal_contract
+    performance:
+      status: not_evaluated
+    strengths:
+    - targets empty-action and no-terminal failure modes
+    - encourages changed strategy after failed routes
+    - preserves round01_6 single-executor control
+    issues:
+    - recovery logic can become conservative if over-triggered
+    - benchmark-specific benefit is unknown before trace inspection
+    evolution_recommendations:
+    - evaluate terminal-completion rate and max-step rate
+    - inspect cannot-determine final answers
+    - keep recovery_contract_check tied to concrete risk states
+    notes: Generated round02_01 recovery specialist evolved from harness_round01_6;
+      no benchmark metrics recorded yet.
+
+  harness_round02_01_8:
+    role: round02_candidate
+    status: generated
+    archive_tier: pending_evaluation
+    tags:
+    - round02
+    - round02_01
+    - parent_round01_6
+    - compact_status
+    - hybrid_controls
+    - direct_react
+    design:
+      summary: Compact hybrid candidate that fuses ledger, slot, evidence, repair,
+        and raw-answer controls while activating detail only when the task shape
+        warrants it.
+      planning: round02_01_compact_status_planning
+      planning_description: Emits a COMPACT_STATUS_FUSION contract that keeps pending,
+        success, failure, slots or evidence, remaining work, and final criteria in
+        one compact status packet.
+      action: round02_01_compact_status_react
+      action_description: A single executor acts directly and reserves status_fusion_check
+        for unresolved high-risk states rather than routine final answers.
+      memory: round02_01_compact_status_memory
+      memory_description: Sparse procedural cues use a longer interval and focus
+        on the highest current risk to avoid turning the hybrid into heavy orchestration.
+      topology: direct_react
+      pairing_reason: round02_compact_status_fusion
+    performance:
+      status: not_evaluated
+    strengths:
+    - integrates the main round02_01 repair ideas in one compact contract
+    - keeps detail risk-triggered rather than always on
+    - may generalize across EnvScaler, SearchQA, and ToolHop
+    issues:
+    - hybrid controls may dilute the specialty gains of narrower candidates
+    - status_fusion_check frequency needs measurement
+    evolution_recommendations:
+    - evaluate as a generalist alongside specialist candidates
+    - compare token cost against harness_round02_01_1
+    - preserve only controls that show trace-level benefit
+    notes: Generated round02_01 compact hybrid evolved from harness_round01_6; no
+      benchmark metrics recorded yet.
+
+  harness_round02_02_1:
+    role: round02_candidate
+    status: generated
+    archive_tier: pending_evaluation
+    tags:
+    - round02
+    - round02_02
+    - parent_round01_8
+    - ledger_commit
+    - status_packet
+    - direct_react
+    design:
+      summary: Balanced evolution of harness_round01_8 where compact STATUS_PACKET
+        becomes a small execution ledger consumed by one ReAct executor, with commit
+        readiness checked only at uncertainty points.
+      planning: round02_02_ledger_commit_planning
+      planning_description: Emits a LEDGER_COMMIT contract with compact rows for
+        obligations, observed bindings, blockers, and final readiness.
+      action: round02_02_ledger_commit_react
+      action_description: A single executor uses guarded task tools and may call
+        ledger_commit_check as a rare non-environmental checker when readiness is
+        unclear.
+      memory: round02_02_ledger_commit_memory
+      memory_description: Phase-aware procedural reminders focus on observation-backed
+        status, stateful commit gates, and raw final binding without storing task
+        facts, IDs, or answers.
+      topology: direct_react
+      pairing_reason: round02_02_observation_ledger_commit
+    performance:
+      status: not_evaluated
+    strengths:
+    - blends status-packet discipline with commit readiness
+    - keeps one executor and rare non-environmental checking
+    - targets observation-backed finalization
+    issues:
+    - commit gates may slow simple read-only tasks
+    - needs evaluation against the round01_8 ToolHop specialty
+    evolution_recommendations:
+    - evaluate as the balanced round02_02 baseline
+    - compare ToolHop preservation against harness_round01_8
+    - monitor ledger_commit_check frequency
+    notes: Generated round02_02 candidate using harness_round01_8 as the explicit
+      design parent; no benchmark metrics recorded yet.
+
+  harness_round02_02_2:
+    role: round02_candidate
+    status: generated
+    archive_tier: pending_evaluation
+    tags:
+    - round02
+    - round02_02
+    - repair_registry
+    - error_class_repair
+    - direct_react
+    design:
+      summary: Repair-first variant that keeps the direct executor while classifying
+        failed calls, blocking blind repetition, and repairing through observed
+        arguments or alternate schema-listed tools.
+      planning: round02_02_repair_registry_planning
+      planning_description: Emits a REPAIR_REGISTRY contract with compact rows for
+        obligations, bindings, blockers, failed-call classes, and final readiness.
+      action: round02_02_repair_registry_react
+      action_description: A single executor uses guarded task tools and may call
+        repair_registry_check as a rare non-environmental checker to constrain the
+        next repaired action.
+      memory: round02_02_repair_registry_memory
+      memory_description: Phase-aware procedural reminders focus on error-class
+        repair, blocked failed-call registries, and argument provenance without storing
+        task facts.
+      topology: direct_react
+      pairing_reason: round02_02_error_class_repair
+    performance:
+      status: not_evaluated
+    strengths:
+    - makes failed-call provenance explicit
+    - prevents blind repetition of identical bad calls
+    - keeps repair grounded in observed arguments and schemas
+    issues:
+    - repair registry may increase prompt footprint
+    - gains depend on how often repeated-call failures occur in evaluation
+    evolution_recommendations:
+    - measure repeated-failure reduction and max-step rate
+    - inspect whether repaired calls use observed arguments
+    - merge with stateful gates only if repair is complementary
+    notes: Generated round02_02 repair specialist; no benchmark metrics recorded
+      yet.
+
+  harness_round02_02_3:
+    role: round02_candidate
+    status: generated
+    archive_tier: pending_evaluation
+    tags:
+    - round02
+    - round02_02
+    - evidence_binding
+    - retrieval
+    - toolhop
+    - direct_react
+    design:
+      summary: Retrieval and multi-hop focused variant that keeps one executor while
+        requiring candidate answers and intermediate variables to be tied to source
+        observations before finalization or dependent hops.
+      planning: round02_02_evidence_binding_planning
+      planning_description: Emits an EVIDENCE_BINDING contract with compact rows
+        for obligations, evidence bindings, blockers, intermediate variables, and
+        final readiness.
+      action: round02_02_evidence_binding_react
+      action_description: A single executor uses guarded task tools and may call
+        evidence_binding_check as a rare non-environmental checker when answer support
+        or dependent-hop evidence is unclear.
+      memory: round02_02_evidence_binding_memory
+      memory_description: Phase-aware procedural reminders emphasize SearchQA candidate
+        arbitration, ToolHop binding tables, and decisive-evidence finalization without
+        storing task facts.
+      topology: direct_react
+      pairing_reason: round02_02_candidate_evidence_binding
+    performance:
+      status: not_evaluated
+    strengths:
+    - targets SearchQA candidate arbitration and ToolHop binding errors
+    - requires observed evidence before dependent hops
+    - keeps finalization tied to decisive observations
+    issues:
+    - evidence tables can become verbose
+    - EnvScaler value is uncertain unless evidence binding helps terminal readiness
+    evolution_recommendations:
+    - evaluate SearchQA subEM and ToolHop correctness
+    - inspect whether dependent-hop variables are copied from observations
+    - keep evidence_binding_check rare on stateful tasks
+    notes: Generated round02_02 evidence-binding specialist; no benchmark metrics
+      recorded yet.
+
+  harness_round02_02_4:
+    role: round02_candidate
+    status: generated
+    archive_tier: pending_evaluation
+    tags:
+    - round02
+    - round02_02
+    - stateful_gate
+    - envscaler
+    - direct_react
+    design:
+      summary: Stateful-workflow variant for EnvScaler-like tasks that emphasizes
+        sequential commit rows and terminal blockers while preserving fast direct
+        execution on read-only tasks.
+      planning: round02_02_stateful_gate_planning
+      planning_description: Emits a STATEFUL_GATE contract with compact rows for
+        obligations, observed bindings, blockers, mutable commits, and final readiness.
+      action: round02_02_stateful_gate_react
+      action_description: A single executor uses guarded task tools and may call
+        stateful_gate_check as a rare non-environmental checker before risky terminal
+        or state-changing decisions.
+      memory: round02_02_stateful_gate_memory
+      memory_description: Phase-aware procedural reminders emphasize EnvScaler invariant
+        ledgers, sequential mutation commits, and terminal blockers without storing
+        task facts.
+      topology: direct_react
+      pairing_reason: round02_02_stateful_commit_gate
+    performance:
+      status: not_evaluated
+    strengths:
+    - targets stateful mutation order and terminal blockers
+    - preserves direct execution when tasks are read-only
+    - uses guarded tools around state-changing calls
+    issues:
+    - gate checks could delay terminal completion if overused
+    - benefit outside EnvScaler-like tasks is uncertain
+    evolution_recommendations:
+    - prioritize EnvScaler score, done proxy, and max-step analysis
+    - inspect read-after-write verification traces
+    - keep read-only routing lightweight
+    notes: Generated round02_02 stateful specialist; no benchmark metrics recorded
+      yet.
+
+  harness_round02_02_5:
+    role: round02_candidate
+    status: generated
+    archive_tier: pending_evaluation
+    tags:
+    - round02
+    - round02_02
+    - raw_answer
+    - canonical_answer
+    - direct_react
+    design:
+      summary: Finalization-focused variant that keeps tool use simple and adds extra
+        commit-time discipline so correct observations are not lost to date, list,
+        number, ID, or yes/no reformatting.
+      planning: round02_02_raw_answer_planning
+      planning_description: Emits a RAW_ANSWER contract with compact rows for obligations,
+        observed bindings, blockers, answer type, raw field, and final readiness.
+      action: round02_02_raw_answer_react
+      action_description: A single executor uses guarded task tools and may call
+        raw_answer_check as a rare non-environmental checker when final answer support
+        or formatting is risky.
+      memory: round02_02_raw_answer_memory
+      memory_description: Phase-aware procedural reminders emphasize answer type
+        detection, raw field copying, and minimal finalization without storing task
+        facts.
+      topology: direct_react
+      pairing_reason: round02_02_raw_final_canonicalization
+    performance:
+      status: not_evaluated
+    strengths:
+    - focuses on final exactness and raw observation copying
+    - keeps exploration and tool use simple
+    - targets common short-answer formatting losses
+    issues:
+    - does not directly address exploration or mutation-order failures
+    - raw-answer checks may be redundant when observations are already clean
+    evolution_recommendations:
+    - evaluate final exactness on SearchQA and ToolHop
+    - inspect date, number, ID, and yes/no normalization errors
+    - merge only if final formatting is a dominant failure source
+    notes: Generated round02_02 finalization specialist; no benchmark metrics recorded
+      yet.
+
+  harness_round02_02_6:
+    role: round02_candidate
+    status: generated
+    archive_tier: pending_evaluation
+    tags:
+    - round02
+    - round02_02
+    - schema_route
+    - mutability_route
+    - direct_react
+    design:
+      summary: Schema-routing variant that infers read-only versus mutable behavior
+        from exposed tool schemas, keeping read-only evidence flexible while making
+        mutable commits sequential and ledger-backed.
+      planning: round02_02_schema_route_planning
+      planning_description: Emits a SCHEMA_ROUTE contract with compact rows for
+        obligations, bindings, blockers, inferred tool mutability, and final readiness.
+      action: round02_02_schema_route_react
+      action_description: A single executor uses guarded task tools and may call
+        schema_route_check as a rare non-environmental checker when routing or commit
+        sequencing is unclear.
+      memory: round02_02_schema_route_memory
+      memory_description: Phase-aware procedural reminders emphasize read-only versus
+        mutable routing, sequential writes, and bounded evidence grouping without
+        storing task facts.
+      topology: direct_react
+      pairing_reason: round02_02_mutability_schema_route
+    performance:
+      status: not_evaluated
+    strengths:
+    - offers a general routing mechanism across read-only and mutable tasks
+    - keeps mutable writes sequential
+    - avoids debate-style parallelism for stateful environments
+    issues:
+    - schema inference can misclassify tools without runtime evidence
+    - routing overhead may not pay off on simple tasks
+    evolution_recommendations:
+    - evaluate per-dataset behavior rather than only mixed score
+    - inspect tool mutability classifications in traces
+    - combine with raw final binding only if routing improves state handling
+    notes: Generated round02_02 schema-routing specialist; no benchmark metrics recorded
+      yet.
+
+  harness_round02_02_7:
+    role: round02_candidate
+    status: generated
+    archive_tier: pending_evaluation
+    tags:
+    - round02
+    - round02_02
+    - verifier_contract
+    - checker_throttle
+    - direct_react
+    design:
+      summary: Verifier-integration variant that preserves the single executor while
+        making verifier use rare and contract-shaped, with concrete next constraints
+        and throttled repeated checker calls.
+      planning: round02_02_verifier_contract_planning
+      planning_description: Emits a VERIFIER_CONTRACT contract with compact rows
+        for obligations, bindings, blockers, verifier constraints, and final readiness.
+      action: round02_02_verifier_contract_react
+      action_description: A single executor uses guarded task tools and may call
+        verifier_contract_check as a rare non-environmental checker that returns
+        concrete next-action constraints.
+      memory: round02_02_verifier_contract_memory
+      memory_description: Phase-aware procedural reminders emphasize rare action-binding
+        verification, checker-loop throttling, and next-action constraints without
+        storing task facts.
+      topology: direct_react
+      pairing_reason: round02_02_binding_verifier_contract
+    performance:
+      status: not_evaluated
+    strengths:
+    - integrates checking while avoiding a second acting agent
+    - throttles repeated checker loops
+    - forces verifier output into concrete next constraints
+    issues:
+    - verifier calls can still add token cost
+    - quality depends on whether checks trigger only at real uncertainty
+    evolution_recommendations:
+    - measure checker-call rate and token overhead
+    - inspect whether verifier constraints change subsequent actions
+    - keep this as a repair candidate unless evaluation shows clear gains
+    notes: Generated round02_02 verifier-contract specialist; no benchmark metrics
+      recorded yet.
+
+  harness_round02_02_8:
+    role: round02_candidate
+    status: generated
+    archive_tier: pending_evaluation
+    tags:
+    - round02
+    - round02_02
+    - minimal_blend
+    - low_noise
+    - direct_react
+    design:
+      summary: Conservative low-noise blend that keeps the winner recognizable, adds
+        only a small snapshot checker and sharper ledger fields, and avoids heavy
+        gates that could slow easy tasks.
+      planning: round02_02_minimal_blend_planning
+      planning_description: Emits a MINIMAL_BLEND contract with compact rows for
+        obligations, observed bindings, blockers, status snapshots, and final readiness.
+      action: round02_02_minimal_blend_react
+      action_description: A single executor uses guarded task tools and may call
+        state_snapshot_check as a rare non-environmental checker for unresolved
+        high-risk states.
+      memory: round02_02_minimal_blend_memory
+      memory_description: Phase-aware procedural reminders emphasize low-noise status
+        packets, generalized repair reminders, and efficient direct execution without
+        storing task facts.
+      topology: direct_react
+      pairing_reason: round02_02_minimal_generalized_blend
+    performance:
+      status: not_evaluated
+    strengths:
+    - preserves a recognizable direct-execution baseline
+    - keeps checks and added fields minimal
+    - may be a useful low-noise generalist
+    issues:
+    - conservative changes may be too small to move benchmark quality
+    - snapshot checks still need cost measurement
+    evolution_recommendations:
+    - evaluate as the low-noise round02_02 generalist
+    - compare cost and max-step rate against stronger gated variants
+    - promote only if it preserves quality while reducing overhead
+    notes: Generated round02_02 minimal blend; no benchmark metrics recorded yet.

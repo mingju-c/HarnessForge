@@ -1,0 +1,55 @@
+# Secrets and local configuration
+**/.env
+**/.env.*
+!**/.env.example
+*.pem
+*.key
+id_rsa*
+*.credentials
+
+# Python caches and local tooling
+**/__pycache__/
+*.py[cod]
+**/.pytest_cache/
+**/.mypy_cache/
+**/.ruff_cache/
+.coverage
+htmlcov/
+
+# Virtual environments and editor state
+**/.venv*/
+**/venv/
+**/env/
+**/.ipynb_checkpoints/
+**/.vscode/
+**/.idea/
+.DS_Store
+
+# Runtime outputs, memories, checkpoints, and logs
+**/storage/
+**/output/
+**/outputs/
+**/logs/
+*.log
+*.lock
+*.tmp
+
+# Public release default: keep harness source, not local datasets/checkpoints.
+HarnessForge_4B/data/
+HarnessForge_8B/data/
+LlamaFactory/data/
+LlamaFactory/saves/
+LlamaFactory/output/
+LlamaFactory/cache/
+**/*.parquet
+**/*.safetensors
+**/*.bin
+**/*.pt
+**/*.pth
+**/*.gguf
+
+# Scratch command logs / local run notes
+**/vllm_*.txt
+**/vllm*.txt
+**/run*.txt
+**/eval_bench.txt*

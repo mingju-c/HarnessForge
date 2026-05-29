@@ -1,0 +1,2791 @@
+metadata:
+  harness_name: harness7
+  default_bench_type: null
+  pairing_reason: flash_goals_direct_parallel_agents
+  planning_system: router_debate
+  action_system: router_debate
+  default_memory_system: dynamic_cheatsheet
+  source_root: harness_factory/rounds/round_00_base/harness7
+artifact_paths:
+  harness_root: harness_factory/rounds/round_00_base/harness7
+  description_path: harness_factory/rounds/round_00_base/harness7/Description.md
+  report_path: harness_factory/rounds/round_00_base/harness7/report.md
+  metrics_path: harness_factory/rounds/round_00_base/harness7/metrics.json
+description_markdown: |-
+  Harness summary:
+  - Planning: outline a few parallel angles worth checking.
+  - Execution: launch a direct batch of generic solvers and compare their reports.
+  - Memory: maintain a compact running cheatsheet of reusable findings.
+  - Default bench: caller-provided
+
+  Coordination pattern:
+  - Keep the initial plan small and parallel-friendly.
+  - Run several independent solver passes in one batch.
+  - Synthesize after comparing the returned evidence and candidate answers.
+
+  Runtime notes:
+  - Generated bundle: `harness7`
+  - Benchmark-specific tools are loaded from `ActionContext` when available.
+  - The coordinator can launch 2-4 generic agents in a single parallel batch.
+profile_metrics:
+  num_tasks: 80
+  answer_correct: 0.2
+  has_valid_answer: 1.0
+  path_score: 0.3796
+  average_actions: 1.0375
+  average_tool_calls: 4.1125
+  prompt_tokens_total: 292308
+  completion_tokens_total: 36178
+  tokens_total: 328486
+  prompt_tokens_avg: 3653.85
+  completion_tokens_avg: 452.23
+  tokens_avg: 4106.07
+  runtime_total_min: 83.65
+  runtime_avg_sec: 62.74
+  harness_name: harness7
+  framework_name: dynamic_cheatsheet
+  source_result_file: output/toolhop_round1_harness7/toolhop_flash_searcher_flash_searcher_dynamic_cheatsheet_local_qwen3-aevolve_closed_results.jsonl
+profile_report_markdown: |-
+  # harness7 Analysis
+
+  ## Structure
+  - Planning: outline a few parallel angles worth checking.
+  - Action: launch a direct batch of generic solvers and compare their reports.
+  - Memory: maintain a compact running cheatsheet of reusable findings.
+
+  ## Aggregate Metrics
+  - Evaluated tasks: 80
+  - Exact accuracy: 20.0%
+  - Valid answer rate: 100.0%
+  - Average path score: 0.3796
+  - Average actions: 1.04
+  - Average tool calls: 4.11
+  - Prompt / completion / total tokens: 292308 / 36178 / 328486
+  - Average prompt / completion / total tokens: 3653.85 / 452.23 / 4106.07
+  - Total runtime: 83.65 min
+  - Average runtime per task: 62.74 sec
+
+  ## Overall Assessment
+  This harness is another strong negative example for ToolHop: it keeps explicit token cost low, but the quality collapse is severe because the whole design assumes that parallel solver diversity will compensate for weak dependency control. That assumption can make sense for open-ended QA or verification-style tasks, but it is poorly matched to serial tool chains. It is more suitable for tasks where multiple independent attempts can be compared without strict state sharing. It is much less suitable for benchmark items where one early entity or argument mistake poisons every downstream step.
+
+  ## Failure Pattern Analysis
+  - The harness almost always stops too early. An average of 1.04 actions means most runs are effectively one batch of parallel guesses plus a synthesis step.
+  - Parallel reports are not being grounded tightly enough in tool observations. As a result, the final answer can look coherent while still being disconnected from the actual benchmark path.
+  - The path score is higher than the exact score, so some useful intermediate structure is being found, but the return from parallel branching is much weaker than the confidence it creates.
+  - The weakest categories are the ones that need disciplined post-processing and formatting, which is exactly where a loose parallel-solver architecture tends to break.
+
+  ## Module-level Diagnosis
+  ### Planning
+  - What Helps: The planning layer does keep the initial structure concise and easy to execute, which avoids the overhead of heavy orchestration.
+  - What Hurts: Planning is built around parallel-friendly angles rather than dependency-sensitive execution. That framing is fundamentally mismatched to many ToolHop tasks.
+
+  ### Action
+  - What Helps: Batch execution can surface multiple hypotheses quickly, and that can be useful when branches are genuinely independent.
+  - What Hurts: The action layer relies too heavily on branch comparison instead of branch validation. It compares reports before ensuring that the reports are grounded in the right upstream facts.
+
+  ### Memory
+  - What Helps: A compact cheatsheet is a sensible lightweight memory form and may help preserve recurring hints or tool usage patterns.
+  - What Hurts: The memory layer does not provide strong enough constraints to stabilize branch outputs. It stores useful fragments, but it does not fix the harness's core synthesis weakness.
+file_order:
+- builder.py
+- Description.md
+- report.md
+- __init__.py
+- planning_module/prompts/toolcalling_agent.yaml
+- planning_module/provider.py
+- action_module/prompts/toolcalling_agent.yaml
+- action_module/provider.py
+- memory_module/provider.py
+source_files:
+  builder.py: |-
+    from __future__ import annotations
+
+    from dataclasses import replace
+    from pathlib import Path
+
+    from Agents.agents import ToolCallingAgent
+    from module_action.base_action import ActionContext
+    from .action_module.provider import ACTION_SYSTEM, get_provider
+    from .memory_module.provider import MEMORY_SYSTEM as DEFAULT_MEMORY_SYSTEM
+    from .planning_module.provider import PLANNING_SYSTEM, PlanningClass
+
+
+    HARNESS_NAME = "harness7"
+    DEFAULT_BENCH_TYPE = None
+    PAIRING_REASON = "flash_goals_direct_parallel_agents"
+
+
+    def _bind_agent_reference(agent: ToolCallingAgent, tool: object | None) -> None:
+        if tool is not None and hasattr(tool, "agent"):
+            setattr(tool, "agent", agent)
+
+
+    def _ensure_owl_memory(agent: ToolCallingAgent) -> None:
+        if getattr(agent, "planning_system", None) != "owl":
+            return
+        if not hasattr(agent, "web_memory") or agent.web_memory is None:
+            agent.web_memory = []
+        if not hasattr(agent, "reasoning_memory") or agent.reasoning_memory is None:
+            agent.reasoning_memory = []
+
+
+    def prepare_context(context: ActionContext) -> ActionContext:
+        bench_type = context.bench_type or DEFAULT_BENCH_TYPE
+        prompts_type = context.prompts_type or PLANNING_SYSTEM
+        prepared_kwargs = dict(context.kwargs)
+        prepared_kwargs["planning_class"] = PlanningClass
+        return replace(
+            context,
+            planning_system=PLANNING_SYSTEM,
+            action_system=ACTION_SYSTEM,
+            prompts_type=prompts_type,
+            bench_type=bench_type,
+            project_root=Path(__file__).resolve().parent,
+            kwargs=prepared_kwargs,
+        )
+
+
+    def build_agent_from_context(context: ActionContext) -> ToolCallingAgent:
+        prepared_context = prepare_context(context)
+        action_provider = get_provider()
+        agent = action_provider.build(prepared_context)
+
+        setattr(agent, "planning_system", prepared_context.planning_system)
+        setattr(agent, "action_system", prepared_context.action_system)
+        setattr(agent, "harness_name", HARNESS_NAME)
+        setattr(
+            agent,
+            "harness_metadata",
+            {
+                "planning_system": PLANNING_SYSTEM,
+                "action_system": ACTION_SYSTEM,
+                "default_bench_type": DEFAULT_BENCH_TYPE,
+                "recommended_memory_system": DEFAULT_MEMORY_SYSTEM,
+                "pairing_reason": PAIRING_REASON,
+            },
+        )
+
+        if prepared_context.vector_tool is not None:
+            prepared_context.vector_tool.memory = agent.memory
+
+        _bind_agent_reference(agent, prepared_context.process_tool)
+        _bind_agent_reference(agent, prepared_context.end_process_tool)
+        _bind_agent_reference(agent, prepared_context.delete_memory_tool)
+        _bind_agent_reference(agent, prepared_context.executor_tool)
+        _bind_agent_reference(agent, prepared_context.refine_tool)
+
+        _ensure_owl_memory(agent)
+        return agent
+  Description.md: |-
+    Harness summary:
+    - Planning: outline a few parallel angles worth checking.
+    - Execution: launch a direct batch of generic solvers and compare their reports.
+    - Memory: maintain a compact running cheatsheet of reusable findings.
+    - Default bench: caller-provided
+
+    Coordination pattern:
+    - Keep the initial plan small and parallel-friendly.
+    - Run several independent solver passes in one batch.
+    - Synthesize after comparing the returned evidence and candidate answers.
+
+    Runtime notes:
+    - Generated bundle: `harness7`
+    - Benchmark-specific tools are loaded from `ActionContext` when available.
+    - The coordinator can launch 2-4 generic agents in a single parallel batch.
+  report.md: |-
+    # harness7 Analysis
+
+    ## Structure
+    - Planning: outline a few parallel angles worth checking.
+    - Action: launch a direct batch of generic solvers and compare their reports.
+    - Memory: maintain a compact running cheatsheet of reusable findings.
+
+    ## Aggregate Metrics
+    - Evaluated tasks: 80
+    - Exact accuracy: 20.0%
+    - Valid answer rate: 100.0%
+    - Average path score: 0.3796
+    - Average actions: 1.04
+    - Average tool calls: 4.11
+    - Prompt / completion / total tokens: 292308 / 36178 / 328486
+    - Average prompt / completion / total tokens: 3653.85 / 452.23 / 4106.07
+    - Total runtime: 83.65 min
+    - Average runtime per task: 62.74 sec
+
+    ## Overall Assessment
+    This harness is another strong negative example for ToolHop: it keeps explicit token cost low, but the quality collapse is severe because the whole design assumes that parallel solver diversity will compensate for weak dependency control. That assumption can make sense for open-ended QA or verification-style tasks, but it is poorly matched to serial tool chains. It is more suitable for tasks where multiple independent attempts can be compared without strict state sharing. It is much less suitable for benchmark items where one early entity or argument mistake poisons every downstream step.
+
+    ## Failure Pattern Analysis
+    - The harness almost always stops too early. An average of 1.04 actions means most runs are effectively one batch of parallel guesses plus a synthesis step.
+    - Parallel reports are not being grounded tightly enough in tool observations. As a result, the final answer can look coherent while still being disconnected from the actual benchmark path.
+    - The path score is higher than the exact score, so some useful intermediate structure is being found, but the return from parallel branching is much weaker than the confidence it creates.
+    - The weakest categories are the ones that need disciplined post-processing and formatting, which is exactly where a loose parallel-solver architecture tends to break.
+
+    ## Module-level Diagnosis
+    ### Planning
+    - What Helps: The planning layer does keep the initial structure concise and easy to execute, which avoids the overhead of heavy orchestration.
+    - What Hurts: Planning is built around parallel-friendly angles rather than dependency-sensitive execution. That framing is fundamentally mismatched to many ToolHop tasks.
+
+    ### Action
+    - What Helps: Batch execution can surface multiple hypotheses quickly, and that can be useful when branches are genuinely independent.
+    - What Hurts: The action layer relies too heavily on branch comparison instead of branch validation. It compares reports before ensuring that the reports are grounded in the right upstream facts.
+
+    ### Memory
+    - What Helps: A compact cheatsheet is a sensible lightweight memory form and may help preserve recurring hints or tool usage patterns.
+    - What Hurts: The memory layer does not provide strong enough constraints to stabilize branch outputs. It stores useful fragments, but it does not fix the harness's core synthesis weakness.
+  __init__.py: |-
+    from .builder import (
+        ACTION_SYSTEM,
+        DEFAULT_BENCH_TYPE,
+        DEFAULT_MEMORY_SYSTEM,
+        PAIRING_REASON,
+        PLANNING_SYSTEM,
+        HARNESS_NAME,
+        build_agent_from_context,
+    )
+
+    __all__ = [
+        "HARNESS_NAME",
+        "PLANNING_SYSTEM",
+        "ACTION_SYSTEM",
+        "DEFAULT_BENCH_TYPE",
+        "DEFAULT_MEMORY_SYSTEM",
+        "PAIRING_REASON",
+        "build_agent_from_context",
+    ]
+  planning_module/prompts/toolcalling_agent.yaml: |-
+    planning:
+      initial_plan: |-
+        You are planning for a router + debate harness.
+
+        Requirements:
+        1. If the exposed tool schemas appear read-only, plan one debate round: solver A direct path, solver B alternate/verification path, judge final.
+        2. If any exposed tool schema appears state-changing or unknown, plan a single executor with critic; no debate.
+        3. Keep the plan to at most 4 bullets.
+        4. Include a stop condition.
+        5. Do not solve the task here.
+
+        Output format:
+        - route:
+        - solver_or_executor_plan:
+        - judge_or_critic_check:
+        - stop_condition:
+      task_input: |-
+        Task:
+        {{task}}
+    summary:
+      update_pre_messages: |-
+        Review router progress. For read-only debate, compare solver reports. For stateful fallback, check single-executor progress and critic feedback.
+      update_post_messages: |-
+        Write a brief progress review for task {{task}} at step {{step}}.
+        Include:
+        - route_used
+        - evidence_collected
+        - disagreement_or_failure
+        - next_safe_move
+        - ready_for_final_answer
+  planning_module/provider.py: |-
+    from __future__ import annotations
+
+    import textwrap
+    from typing import Any, Callable, Dict, List, Optional
+
+    from jinja2 import StrictUndefined, Template
+    from rich.rule import Rule
+    from rich.text import Text
+
+    from Agents.memory import ActionStep, PlanningStep, SummaryStep
+    from Agents.models import ChatMessage, MessageRole
+    from Agents.monitoring import LogLevel
+    from module_planning.base_planning import BasePlanning
+
+
+    def populate_template(template: str, variables: Dict[str, Any]) -> str:
+        compiled_template = Template(template, undefined=StrictUndefined)
+        try:
+            return compiled_template.render(**variables)
+        except Exception:
+            return Template(template).render(**variables)
+
+
+    class PlanningProvider(BasePlanning):
+        def topology_initialize(self, task: str) -> PlanningStep:
+            system_prompt = populate_template(
+                self.prompt_templates["planning"]["initial_plan"],
+                {
+                    "task": task,
+                    "tools": self.tools,
+                },
+            )
+            task_prompt = populate_template(
+                self.prompt_templates["planning"].get("task_input", "Task:\n{{task}}"),
+                {"task": task},
+            )
+
+            input_messages = [
+                {
+                    "role": MessageRole.SYSTEM,
+                    "content": [{"type": "text", "text": system_prompt}],
+                }
+            ]
+            memory_guidance = self.append_memory_guidance(input_messages)
+            task_messages = [
+                {
+                    "role": MessageRole.USER,
+                    "content": [{"type": "text", "text": task_prompt}],
+                }
+            ]
+
+            response: ChatMessage = self.model(input_messages + task_messages)
+            plan_text = response.content
+            plan_reasoning = getattr(response, "reasoning_content", "")
+
+            self.logger.log(
+                Rule("Parallel Plan", style="orange"),
+                Text(
+                    textwrap.dedent(
+                        f"""Planned execution outline:
+                ```
+                {plan_text}
+                ```"""
+                    )
+                ),
+                level=LogLevel.INFO,
+            )
+
+            planning_step = PlanningStep(
+                model_input_messages=input_messages,
+                plan=plan_text,
+                plan_think="",
+                plan_reasoning=plan_reasoning,
+                memory_guidance=memory_guidance,
+            )
+            self.memory.steps.append(planning_step)
+            return planning_step
+
+        def adaptation(
+            self,
+            task: str,
+            step: int,
+            write_memory_to_messages: Callable[
+                [Optional[List[ActionStep]], Optional[bool]], List[Dict[str, str]]
+            ],
+        ) -> SummaryStep:
+            memory_messages = write_memory_to_messages(None, False)[1:]
+            pre_text = populate_template(
+                self.prompt_templates["summary"]["update_pre_messages"],
+                {"task": task, "step": step},
+            )
+            post_text = populate_template(
+                self.prompt_templates["summary"]["update_post_messages"],
+                {"task": task, "step": step},
+            )
+
+            input_messages = [
+                {
+                    "role": MessageRole.SYSTEM,
+                    "content": [{"type": "text", "text": pre_text}],
+                },
+                *memory_messages,
+                {
+                    "role": MessageRole.USER,
+                    "content": [{"type": "text", "text": post_text}],
+                },
+            ]
+
+            response: ChatMessage = self.model(input_messages)
+            summary_text = response.content
+            summary_reasoning = getattr(response, "reasoning_content", "")
+
+            self.logger.log(
+                Rule("Progress Review", style="orange"),
+                Text(f"\n{summary_text}\n"),
+                level=LogLevel.INFO,
+            )
+
+            summary_step = SummaryStep(
+                model_input_messages=input_messages,
+                summary=summary_text,
+                summary_reasoning=summary_reasoning,
+            )
+            self.memory.steps.append(summary_step)
+            return summary_step
+
+
+    PLANNING_SYSTEM = "router_debate"
+    PLANNING_MODULE = "router_debate"
+    PlanningClass = PlanningProvider
+
+    __all__ = ["PLANNING_SYSTEM", "PLANNING_MODULE", "PlanningProvider", "PlanningClass"]
+  action_module/prompts/toolcalling_agent.yaml: |-
+    system_prompt: |-
+      You are the judge in a router + debate harness.
+
+      This prompt is used only when the exposed tool schemas appear read-only.
+      Your job is to call solver_a and solver_b independently, compare their reports, and choose the best supported final answer.
+
+      Rules:
+      1. Call solver_a and solver_b once, preferably in the same step.
+      2. Do not call real environment tools yourself.
+      3. Compare answer agreement, evidence, and obvious schema failures. Prefer reports backed by concrete tool observations over reports based only on prior knowledge.
+      4. If one solver failed and the other has supported evidence, use the supported answer.
+      5. If a solver's stated answer conflicts with its evidence observations, trust the evidence observations over the stated answer.
+      6. If both solvers report no evidence-tool observation, treat the debate as failed rather than inventing an answer.
+      7. Do not run debate when any exposed tool schema appears state-changing or unknown.
+      8. Return strict JSON only.
+      9. The final answer must be the raw answer string only. No evidence, labels, markdown, or uncertainty text in the final answer field.
+
+      ### Tools
+      {%- for tool in tools.values() %}
+      - {{ tool.name }}: {{ tool.description }}
+      {%- endfor %}
+    step:
+      pre_messages: |-
+        [ROUTER + DEBATE PROTOCOL]
+        1. If solver_a and solver_b have not both been called, call both with the full read-only task.
+        2. Once both reports are available, judge them by completed tool evidence first, then answer consistency.
+        3. After both reports are available, call final_answer immediately with the raw answer only.
+        4. If a solver hit schema/repetition/evidence-gate failure, do not copy the failure; rely on the other solver only if it has concrete observed evidence.
+        5. If the report answer and evidence observations disagree, final_answer should follow the evidence observations.
+
+        Return JSON only:
+        {
+          "think": "brief reasoning",
+          "tools": [
+            {
+              "name": "solver_a | solver_b | final_answer",
+              "arguments": {}
+            }
+          ]
+        }
+
+        Tool Definitions:
+        {{tool_functions_json}}
+
+        Task: {{task}}
+    final_answer:
+      pre_messages: The judge has enough solver evidence to finalize the read-only task. Return only the raw answer requested by the task.
+      post_messages: |-
+        Return JSON:
+        {"think": "...", "answer": "..."}
+
+        The `answer` field should contain only the final answer requested by the task. Do not include evidence, labels, or explanation.
+        Task: {{task}}
+    worker:
+      system_prompt: |-
+        You are a generic agent in a lightweight direct-parallel team.
+        You solve the current task independently and return a concise, evidence-backed report.
+
+        Rules:
+        - Start with a very short internal plan, then execute it directly.
+        - Treat the assigned task as your full objective for this run.
+        - Use only the currently available tools.
+        - Prefer concrete evidence and decisive progress.
+        - Finish in as few steps as possible.
+        - Read the tool schemas carefully and use only the listed argument names and types.
+        - If a tool call fails because of invalid arguments or schema mismatch, repair the arguments on the next attempt instead of repeating the same failed call.
+        - Never repeat an identical failed call unless the observation explicitly justifies it.
+        - Base your report only on observations; do not replace a supported observed result with a new guess.
+        - Return exactly one JSON object:
+          {"think": "...", "tools": [{"name": "...", "arguments": {...}}]}
+
+        ### Tools
+        {%- for tool in tools.values() %}
+        - {{ tool.name }}: {{ tool.description }}
+            Inputs: {{ tool.inputs }}
+            Output: {{ tool.output_type }}
+        {%- endfor %}
+      step:
+        pre_messages: |-
+          You are one direct-parallel agent.
+          Solve the assigned task independently and prepare a concise evidence-backed report.
+          Keep your plan and execution short.
+          If progress is weak, change the tool choice, arguments, or strategy instead of retrying blindly.
+          Return JSON only.
+      final_answer:
+        pre_messages: Finalize the parallel-agent report.
+        post_messages: |-
+          Return JSON:
+          {"think": "...", "answer": "..."}
+
+          The answer should include:
+          - task outcome
+          - key evidence
+          - candidate result if available
+          - remaining uncertainty if any
+
+    solver_a:
+      system_prompt: |-
+        You are solver A in a read-only debate. Use the available tools directly, follow schemas exactly, and return the shortest supported answer with evidence.
+        Prefer a direct evidence path. Do not invent tools or arguments.
+        If any non-final evidence tool is available, your first completed action must be a relevant evidence-tool call, not final_answer.
+        Do not answer from parametric memory when an available tool can verify the answer.
+
+        ### Tools
+        {%- for tool in tools.values() %}
+        - {{ tool.name }}: {{ tool.description }}
+            Inputs: {{ tool.inputs }}
+            Output: {{ tool.output_type }}
+        {%- endfor %}
+      step:
+        pre_messages: |-
+          Solve the assigned read-only task independently. If you have not yet observed a non-final evidence tool result, call one relevant evidence tool first. If a tool fails, repair arguments or switch strategy. Once a completed observation supports a candidate, call final_answer. Return JSON only.
+          Task: {{task}}
+      final_answer:
+        pre_messages: Finalize solver A report.
+        post_messages: |-
+          Return JSON:
+          {"think": "...", "answer": "ANSWER: <raw answer>; EVIDENCE: <brief evidence>"}
+
+    solver_b:
+      system_prompt: |-
+        You are solver B in a read-only debate. Use a different route or verification angle when possible, follow schemas exactly, and return the shortest supported answer with evidence.
+        Prefer cross-checking or an alternate decomposition. Do not invent tools or arguments.
+        If any non-final evidence tool is available, your first completed action must be a relevant evidence-tool call, not final_answer.
+        Do not answer from parametric memory when an available tool can verify the answer.
+
+        ### Tools
+        {%- for tool in tools.values() %}
+        - {{ tool.name }}: {{ tool.description }}
+            Inputs: {{ tool.inputs }}
+            Output: {{ tool.output_type }}
+        {%- endfor %}
+      step:
+        pre_messages: |-
+          Solve the assigned read-only task independently with an alternate angle when possible. If you have not yet observed a non-final evidence tool result, call one relevant evidence tool first. If a tool fails, repair arguments or switch strategy. Once a completed observation supports a candidate, call final_answer. Return JSON only.
+          Task: {{task}}
+      final_answer:
+        pre_messages: Finalize solver B report.
+        post_messages: |-
+          Return JSON:
+          {"think": "...", "answer": "ANSWER: <raw answer>; EVIDENCE: <brief evidence>"}
+
+    stateful:
+      system_prompt: |-
+        You are the stateful fallback for router_debate.
+        Because the exposed tool schema may mutate environment state or is unknown, do not debate with multiple solvers.
+        Use one executor path plus stateful_critic.
+
+        Rules:
+        - Use only provided real tools and schemas.
+        - Prefer one state-changing call per step.
+        - Never repeat an identical failed call.
+        - Call stateful_critic only after a suspicious failure pattern or before a risky final_answer.
+        - If the task has a terminal completion tool, use it only after required state changes are done.
+        - If complete_task/task_completed exists and all required state changes are done, call it directly instead of final_answer.
+      step:
+        pre_messages: |-
+          Stateful fallback loop.
+
+          Tool schemas:
+          {{tool_functions_json}}
+
+          Task:
+          {{task}}
+
+          Choose one valid next tool. If ready to stop and a terminal completion tool exists, call it directly. For QA final_answer, use the raw answer only.
+          Return JSON only:
+          {"think": "...", "tools": [{"name": "...", "arguments": {...}}]}
+      final_answer:
+        pre_messages: Finalize with the raw requested answer only. Prefer a terminal completion tool over final_answer for completed state-change tasks.
+        post_messages: |-
+          Return JSON:
+          {"think": "...", "answer": "..."}
+          Task: {{task}}
+  action_module/provider.py: |-
+    from __future__ import annotations
+
+    from typing import Any
+
+    import json_repair
+    from Agents.memory import ActionStep
+    from Agents.models import MessageRole
+    from _harness_guards import (
+        ReflectionCriticTool,
+        guard_task_tools,
+        is_read_only_tool_schema,
+        schema_route_name,
+    )
+    from module_action.base_action import ActionContext, BaseActionProvider, SubAgentTool
+
+
+    class EvidenceReportingSubAgentTool(SubAgentTool):
+        """Sub-agent tool that exposes compact internal evidence to the judge."""
+
+        def __init__(
+            self,
+            *,
+            evidence_tool_names: set[str],
+            evidence_char_budget: int = 1400,
+            **kwargs: Any,
+        ) -> None:
+            self.evidence_tool_names = set(evidence_tool_names)
+            self.evidence_char_budget = evidence_char_budget
+            super().__init__(**kwargs)
+
+        def _evidence_digest(self, payload: dict[str, Any]) -> str:
+            chunks: list[str] = []
+            for step in payload.get("agent_trajectory", []) or []:
+                if not isinstance(step, dict) or step.get("name") != "action":
+                    continue
+                observations = str(step.get("obs", "") or "").strip()
+                if not observations or observations == "No observations":
+                    continue
+                for call in step.get("tool_calls", []) or []:
+                    if not isinstance(call, dict):
+                        continue
+                    tool_name = call.get("name")
+                    if tool_name not in self.evidence_tool_names:
+                        continue
+                    arguments = call.get("arguments", {})
+                    snippet = observations.replace("\n", " ").strip()
+                    if len(snippet) > self.evidence_char_budget:
+                        snippet = snippet[: self.evidence_char_budget].rstrip() + "..."
+                    chunks.append(f"- {tool_name}({arguments}): {snippet}")
+            return "\n".join(chunks)
+
+        def _reconcile_report(
+            self,
+            *,
+            task: str,
+            payload: dict[str, Any],
+            digest: str,
+        ) -> str | None:
+            model = getattr(self.subagent, "model", None)
+            if model is None:
+                return None
+
+            solver_answer = str(payload.get("agent_result", "") or "").strip()
+            prompt = (
+                "You are an evidence reconciler for a read-only tool-use solver.\n"
+                "Given the assigned task, the solver's stated answer, and the actual "
+                "tool observations, produce a concise report for a judge.\n\n"
+                "Rules:\n"
+                "1. Base the report on the tool observations, not prior knowledge.\n"
+                "2. If the stated answer conflicts with the observations, follow the observations.\n"
+                "3. If the observations contain a direct date, name, entity, or value requested "
+                "by the task, extract that value as the answer.\n"
+                "4. Return strict JSON only with keys answer, evidence, uncertainty.\n\n"
+                f"Assigned task:\n{task}\n\n"
+                f"Solver stated answer:\n{solver_answer}\n\n"
+                f"Tool observations:\n{digest}\n"
+            )
+            try:
+                response = model(
+                    [
+                        {
+                            "role": MessageRole.USER,
+                            "content": [{"type": "text", "text": prompt}],
+                        }
+                    ]
+                )
+                content = str(getattr(response, "content", response)).strip()
+                data = json_repair.loads(content)
+            except Exception:
+                return None
+
+            if not isinstance(data, dict):
+                return None
+            answer = str(data.get("answer", "") or "").strip()
+            evidence = str(data.get("evidence", "") or "").strip()
+            uncertainty = str(data.get("uncertainty", "") or "").strip()
+            if not answer:
+                return None
+            lines = [f"ANSWER: {answer}"]
+            if evidence:
+                lines.append(f"EVIDENCE: {evidence}")
+            if uncertainty:
+                lines.append(f"UNCERTAINTY: {uncertainty}")
+            return "\n".join(lines)
+
+        def _fallback_evidence_probe(
+            self,
+            *,
+            task: str,
+        ) -> tuple[str, dict[str, Any], str] | None:
+            candidates = [
+                name
+                for name in sorted(self.evidence_tool_names)
+                if name in getattr(self.subagent, "tools", {})
+            ]
+            if len(candidates) != 1:
+                return None
+
+            tool_name = candidates[0]
+            tool = self.subagent.tools.get(tool_name)
+            inputs = dict(getattr(tool, "inputs", {}) or {})
+            if len(inputs) != 1:
+                return None
+
+            argument_name, argument_spec = next(iter(inputs.items()))
+            argument_type = str(argument_spec.get("type", "string")).lower()
+            if argument_type not in {"string", "str"}:
+                return None
+
+            query_text = str(getattr(self.coordinator, "task", "") or task).strip()
+            if not query_text:
+                return None
+            arguments = {argument_name: query_text}
+            try:
+                observation = tool.__call__(**arguments, sanitize_inputs_outputs=True)
+            except Exception as exc:
+                observation = f"Fallback evidence probe failed: {exc}"
+            return tool_name, arguments, str(observation).strip()
+
+        def forward(self, task: str) -> dict[str, Any]:
+            payload = super().forward(task)
+            if not isinstance(payload, dict):
+                return payload
+            digest = self._evidence_digest(payload)
+            if not digest:
+                fallback = self._fallback_evidence_probe(task=task)
+                if fallback is not None:
+                    tool_name, arguments, observation = fallback
+                    payload.setdefault("agent_trajectory", []).append(
+                        {
+                            "name": "action",
+                            "tool_calls": [{"name": tool_name, "arguments": arguments}],
+                            "obs": (
+                                f"Results for fallback evidence probe '{tool_name}' "
+                                f"with arguments '{arguments}':\n{observation}"
+                            ),
+                            "think": "fallback evidence probe",
+                        }
+                    )
+                    digest = self._evidence_digest(payload)
+            if digest:
+                payload["evidence_digest"] = digest
+                reconciled_report = self._reconcile_report(
+                    task=task,
+                    payload=payload,
+                    digest=digest,
+                )
+                if reconciled_report:
+                    payload["reconciled_report"] = reconciled_report
+                payload["report"] = (
+                    f"{payload.get('report', '').rstrip()}\n\n"
+                    + (
+                        f"Evidence-reconciled report:\n{reconciled_report}\n\n"
+                        if reconciled_report
+                        else ""
+                    )
+                    + "Evidence observations used by this solver:\n"
+                    f"{digest}"
+                )
+            return payload
+
+
+    class ActionProvider(BaseActionProvider):
+        PROMPTS_TYPE = "router_debate"
+        DEFAULT_SOLVER_MAX_STEPS = 6
+        DEFAULT_STATEFUL_SUMMARY_INTERVAL = 6
+
+        def _solver_max_steps(self, context: ActionContext) -> int:
+            remaining_budget = max(1, context.max_steps - 2)
+            return max(4, min(self.DEFAULT_SOLVER_MAX_STEPS, remaining_budget))
+
+        def _stateful_tool_budget(self, context: ActionContext) -> int:
+            return max(8, min(12, context.max_steps // 2))
+
+        def _evidence_tool_names(self, tools: list[Any]) -> set[str]:
+            return {
+                str(getattr(tool, "name", ""))
+                for tool in tools
+                if getattr(tool, "name", None)
+                and getattr(tool, "name", None) != "final_answer"
+            }
+
+        def _has_completed_evidence_observation(
+            self,
+            agent: Any,
+            evidence_tool_names: set[str],
+        ) -> bool:
+            for step in getattr(getattr(agent, "memory", None), "steps", []):
+                if not isinstance(step, ActionStep):
+                    continue
+                observations = str(getattr(step, "observations", "") or "").strip()
+                if not observations or observations == "No observations":
+                    continue
+                for call in getattr(step, "tool_calls", []) or []:
+                    if getattr(call, "name", None) in evidence_tool_names:
+                        return True
+            return False
+
+        def _install_read_only_evidence_gate(
+            self,
+            agent: Any,
+            evidence_tool_names: set[str],
+        ) -> None:
+            if not evidence_tool_names:
+                return
+
+            original_step = agent.step
+            original_provide_final_answer = agent.provide_final_answer
+
+            def gated_step(memory_step: ActionStep):
+                final_answer = original_step(memory_step)
+                if final_answer is None:
+                    return None
+                if self._has_completed_evidence_observation(agent, evidence_tool_names):
+                    return final_answer
+
+                memory_step.observations = (
+                    "Evidence gate blocked premature final_answer: this read-only solver "
+                    "has non-final evidence tools available but has not completed any "
+                    "evidence-tool observation yet. Call one relevant evidence tool first, "
+                    "then finalize from the observation."
+                )
+                return None
+
+            def gated_provide_final_answer(task: str):
+                if self._has_completed_evidence_observation(agent, evidence_tool_names):
+                    return original_provide_final_answer(task)
+                return (
+                    "",
+                    "Evidence gate: no completed non-final evidence-tool observation.",
+                    (
+                        "ANSWER: UNKNOWN; EVIDENCE: no completed evidence-tool "
+                        "observation; UNCERTAINTY: solver stopped before using the "
+                        "available read-only tools."
+                    ),
+                )
+
+            agent.step = gated_step
+            agent.provide_final_answer = gated_provide_final_answer
+            setattr(
+                agent,
+                "read_only_evidence_gate",
+                {
+                    "required_before_final": True,
+                    "evidence_tools": sorted(evidence_tool_names),
+                },
+            )
+
+        def build_affordance(
+            self,
+            bench_type: str | None,
+            context: ActionContext,
+        ) -> list[Any]:
+            return self.get_primary_task_tools(context, include_reasoning=True)
+
+        def build_specification(
+            self,
+            context: ActionContext,
+            tools: list[Any],
+        ) -> None:
+            self.prompts_type = self.PROMPTS_TYPE
+            self.prompt_templates = self.load_prompt_templates(context, self.prompts_type)
+            self.organization_planning_system = context.planning_system or self.PROMPTS_TYPE
+            self.route_name = schema_route_name(tools)
+            self.use_debate = is_read_only_tool_schema(tools)
+            if not self.use_debate:
+                return
+
+            guarded_read_tools = guard_task_tools(
+                tools,
+                policy_label="router_debate_read_only_solver",
+                max_real_tool_calls=self._solver_max_steps(context),
+            )
+            solver_max_steps = self._solver_max_steps(context)
+            self.solver_a = self.create_subagent(
+                context,
+                tools=guarded_read_tools,
+                planning_system=self.organization_planning_system,
+                prompt_templates=self.prompt_templates["solver_a"],
+                name="solver_a",
+                description=(
+                    "Independent read-only solver A. It should solve directly and report evidence."
+                ),
+                max_steps=solver_max_steps,
+                summary_interval=context.max_steps + 1,
+            )
+            self.solver_b = self.create_subagent(
+                context,
+                tools=guarded_read_tools,
+                planning_system=self.organization_planning_system,
+                prompt_templates=self.prompt_templates["solver_b"],
+                name="solver_b",
+                description=(
+                    "Independent read-only solver B. It should use a different route when possible."
+                ),
+                max_steps=solver_max_steps,
+                summary_interval=context.max_steps + 1,
+            )
+            evidence_tool_names = self._evidence_tool_names(guarded_read_tools)
+            self.evidence_tool_names = evidence_tool_names
+            self._install_read_only_evidence_gate(self.solver_a, evidence_tool_names)
+            self._install_read_only_evidence_gate(self.solver_b, evidence_tool_names)
+
+        def build_organization(
+            self,
+            context: ActionContext,
+            tools: list[Any],
+        ):
+            if self.use_debate:
+                solver_tools = [
+                    EvidenceReportingSubAgentTool(
+                        name=solver.name,
+                        agent=solver,
+                        description=(
+                            f"{solver.name}: independent solver for read-only tool-schema tasks."
+                        ),
+                        max_steps=self._solver_max_steps(context),
+                        include_parent_task=True,
+                        evidence_tool_names=self.evidence_tool_names,
+                        role_instructions=(
+                            "- Solve the assigned read-only task independently.\n"
+                            "- If non-final evidence tools are available, complete at least "
+                            "one relevant evidence-tool call before final_answer.\n"
+                            "- Do not answer from parametric memory when an evidence tool can "
+                            "verify the answer.\n"
+                            "- Use only valid tool schemas.\n"
+                            "- Return a concise report with answer, evidence, and uncertainty.\n"
+                            "- Do not assume stateful authority; this route is enabled only by read-only tool schemas."
+                        ),
+                    )
+                    for solver in (self.solver_a, self.solver_b)
+                ]
+                guarded_solver_tools = guard_task_tools(
+                    solver_tools,
+                    policy_label="router_debate_judge",
+                    max_real_tool_calls=2,
+                )
+                agent = self.create_agent(
+                    context,
+                    tools=self.normalize_tools(guarded_solver_tools),
+                    prompt_templates=self.prompt_templates,
+                    prompts_type=self.prompts_type,
+                    planning_system=self.organization_planning_system,
+                )
+                agent.summary_interval = context.max_steps + 1
+                for solver_tool in solver_tools:
+                    solver_tool.coordinator = agent
+                for solver_tool in guarded_solver_tools:
+                    solver_tool.coordinator = agent
+                agent.managed_agents = {
+                    solver.name: solver for solver in (self.solver_a, self.solver_b)
+                }
+                setattr(
+                    agent,
+                    "harness_policy",
+                    {
+                        "mode": "router_debate_read_only",
+                        "route": self.route_name,
+                        "solvers": ["solver_a", "solver_b"],
+                        "judge": "root_agent",
+                    },
+                )
+                return agent
+
+            guarded_tools = guard_task_tools(
+                tools,
+                policy_label="router_stateful_single_executor",
+                max_real_tool_calls=self._stateful_tool_budget(context),
+            )
+            critic = ReflectionCriticTool(
+                context=context,
+                name="stateful_critic",
+                description=(
+                    "Non-environment critic for stateful fallback. It checks tool validity, "
+                    "arguments, repeated failures, and stop conditions without touching state."
+                ),
+            )
+            root_tools = self.normalize_tools([*guarded_tools, critic])
+            stateful_templates = self.prompt_templates.get("stateful", self.prompt_templates)
+            agent = self.create_agent(
+                context,
+                tools=root_tools,
+                prompt_templates=stateful_templates,
+                prompts_type=self.prompts_type,
+                planning_system=self.organization_planning_system,
+            )
+            critic.bind_agent(agent, root_tools)
+            if agent.summary_interval is None:
+                agent.summary_interval = self.DEFAULT_STATEFUL_SUMMARY_INTERVAL
+            setattr(
+                agent,
+                "harness_policy",
+                {
+                    "mode": "router_stateful_single_executor_critic",
+                    "route": self.route_name,
+                    "critic_tool": critic.name,
+                    "real_tool_budget": self._stateful_tool_budget(context),
+                },
+            )
+            return agent
+
+
+    ACTION_SYSTEM = "router_debate"
+    ACTION_MODULE = "router_debate"
+
+
+    ParallelAgentsActionProvider = ActionProvider
+
+
+    def get_provider():
+        return ActionProvider()
+
+
+    __all__ = [
+        "ACTION_SYSTEM",
+        "ACTION_MODULE",
+        "ActionProvider",
+        "get_provider",
+        "ParallelAgentsActionProvider",
+    ]
+  memory_module/provider.py: |-
+    from __future__ import annotations
+
+    import io
+    import os
+    import json
+    import uuid
+    import time
+    import sys
+    from typing import Any, Dict, List, Optional, Tuple, Union
+
+    import numpy as np
+    from sklearn.metrics.pairwise import cosine_similarity
+    try:
+        from sentence_transformers import SentenceTransformer
+    except Exception:
+        SentenceTransformer = None
+    from module_memory.providers.model_loader import load_sentence_transformer
+
+    from module_memory.base_memory import BaseMemoryProvider, atomic_write_json, atomic_write_text, file_lock
+    from module_memory.memory_types import (
+        MemoryStatus,
+        MemoryType,
+        MemoryRequest,
+        MemoryResponse,
+        MemoryItem,
+        MemoryItemType,
+        TrajectoryData,
+    )
+
+    def _ensure_dir(path: str) -> None:
+        os.makedirs(path, exist_ok=True)
+
+
+    def _read_text(path: str) -> str:
+        if not os.path.exists(path):
+            return ""
+        with io.open(path, "r", encoding="utf-8") as f:
+            return f.read()
+
+
+    def _write_text(path: str, content: str) -> None:
+        atomic_write_text(path, content if content is not None else "")
+
+
+    def _extract_tag(text: str, tag: str = "cheatsheet") -> str:
+        import re
+        m = re.search(rf"<{tag}>([\s\S]*?)</{tag}>", text, re.IGNORECASE)
+        return (m.group(1).strip() if m else text).strip()
+
+
+    def load_embedding_model(model_name: str = 'sentence-transformers/all-MiniLM-L6-v2',
+                             cache_dir: str = './storage/models') -> Optional[SentenceTransformer]:
+        return load_sentence_transformer(
+            model_name=model_name,
+            cache_dir=cache_dir,
+            allow_unavailable=SentenceTransformer is None,
+        )
+
+
+    class MemoryProvider(BaseMemoryProvider):
+
+        def __init__(self, config: Optional[dict] = None):
+            if config is None:
+                raise ValueError("DynamicCheatsheetProvider requires an explicit config dict.")
+            super().__init__(memory_type=MemoryType.DYNAMIC_CHEATSHEET, config=config)
+            cfg = self.config
+
+            self.store_path: str = cfg.get("store_path", "./dynamic_cheatsheet")
+            self.records_file: str = cfg.get("records_file", "dynamic_cheatsheet.json")
+            self.cheatsheet_file: str = cfg.get("cheatsheet_file", "global_cheatsheet.txt")
+
+            self.records_path: str = os.path.join(self.store_path, self.records_file)
+            self.cheatsheet_path: str = os.path.join(self.store_path, self.cheatsheet_file)
+
+            self.top_k: int = int(cfg.get("top_k", 1))
+
+            self.model = cfg.get("model")
+            self.embedding_model_name = cfg.get("embedding_model", 'sentence-transformers/all-MiniLM-L6-v2')
+            self.embedding_cache_dir = cfg.get("embedding_cache_dir", './storage/models')
+
+            self.embedding_model = None
+            self._records: List[Dict[str, Any]] = []
+            self._embs: Optional[np.ndarray] = None
+
+        @staticmethod
+        def _token_overlap_score(query: str, candidate: str) -> float:
+            query_tokens = {token for token in query.lower().split() if token}
+            candidate_tokens = {token for token in candidate.lower().split() if token}
+            if not query_tokens or not candidate_tokens:
+                return 0.0
+            return len(query_tokens & candidate_tokens) / len(query_tokens)
+
+        def _load_memories_from_json(self):
+            if os.path.exists(self.records_path):
+                try:
+                    with open(self.records_path, 'r', encoding='utf-8') as f:
+                        data = json.load(f)
+                        self._records = data.get('memories', [])
+                        embeddings_list = data.get('embeddings', [])
+
+                        if embeddings_list:
+                            self._embs = np.array(embeddings_list, dtype=np.float32)
+                            print(f"Loaded {len(self._records)} memories and embeddings from {self.records_path}")
+                        else:
+                            self._embs = None
+                            print(f"Loaded {len(self._records)} memories from {self.records_path} (no embeddings found).")
+
+                except json.JSONDecodeError:
+                    print(f"Warning: Could not parse {self.records_path}. Starting with empty memory.", file=sys.stderr)
+                    self._records = []
+                    self._embs = None
+                except Exception as e:
+                    print(f"Error loading memories: {e}. Starting fresh.", file=sys.stderr)
+                    self._records = []
+                    self._embs = None
+            else:
+                print("No memory file found. Starting with empty memory.")
+                self._records = []
+                self._embs = None
+
+        def _save_memories_to_json(self):
+            try:
+                db_dir = os.path.dirname(self.records_path)
+                if db_dir:
+                    os.makedirs(db_dir, exist_ok=True)
+
+                embeddings_list = []
+                if self._embs is not None and self._embs.size > 0:
+                    embeddings_list = self._embs.tolist()
+
+                data = {
+                    'memories': self._records,
+                    'embeddings': embeddings_list
+                }
+
+                atomic_write_json(self.records_path, data, indent=4)
+
+            except Exception as e:
+                print(f"Error saving memories to {self.records_path}: {e}", file=sys.stderr)
+
+        def initialize(self) -> bool:
+            _ensure_dir(self.store_path)
+
+            self.embedding_model = load_embedding_model(
+                model_name=self.embedding_model_name,
+                cache_dir=self.embedding_cache_dir
+            )
+
+            self._load_memories_from_json()
+
+            if not os.path.exists(self.cheatsheet_path):
+                _write_text(self.cheatsheet_path, "")
+
+            return True
+
+        def _embed_texts(self, texts: List[str]) -> np.ndarray:
+            if not texts or self.embedding_model is None:
+                return np.array([])
+            vecs = self.embedding_model.encode(texts, convert_to_numpy=True)
+            return vecs.astype(np.float32)
+
+        def _chat_complete(self, prompt: str) -> str:
+            if self.model is None:
+                print("[WARN] No LLM model available for DynamicCheatsheetProvider.", file=sys.stderr)
+                return ""
+            try:
+                resp = self.model([{"role": "user", "content": prompt}])
+                content = getattr(resp, "content", str(resp))
+                return str(content).strip()
+            except Exception as e:
+                print(f"[ERROR] LLM generation failed: {e}", file=sys.stderr)
+                return ""
+
+        def _reconstruct_trajectory_string(self, trajectory_data: TrajectoryData) -> str:
+            if not trajectory_data.trajectory:
+                return "No execution trajectory available"
+
+            trajectory_parts = []
+            trajectory_parts.append(f"Task: {trajectory_data.query}")
+            trajectory_parts.append("")
+
+            for i, step in enumerate(trajectory_data.trajectory, 1):
+                step_type = step.get('type', 'step')
+                content = step.get('content', '')
+                trajectory_parts.append(f"Step {i} ({step_type}): {content}")
+
+            if trajectory_data.result:
+                trajectory_parts.append("")
+                trajectory_parts.append(f"Final Result: {trajectory_data.result}")
+
+            return "\n".join(trajectory_parts)
+
+        def _summarize_trajectory_with_llm(self, trajectory_data: TrajectoryData) -> str:
+            current_trajectory = self._reconstruct_trajectory_string(trajectory_data)
+            if self.model is None:
+                print("No LLM model provided for summarization. Falling back to full text.", file=sys.stderr)
+                return current_trajectory
+
+            is_correct = trajectory_data.metadata.get("is_correct", False)
+
+            system_prompt = f"""Summarize this agent task execution trajectory step by step.
+
+            Question: {trajectory_data.query}
+            Final Result: {trajectory_data.result}
+            Correctness: {'Correct' if is_correct else 'Wrong'}
+            Trajectory: {current_trajectory}
+
+            IMPORTANT: Provide a step-by-step summary in this format:
+
+            Step 0: [Brief description of what happened in step 0, including memory guidance if any]
+            Step 1: [Brief description of what happened in step 1, including tool calls and key observations]
+            Step 2: [Brief description of what happened in step 2]
+            ...
+
+            After the step-by-step summary, add a brief conclusion about:
+            - Overall approach taken
+            - Whether memory guidance was effective
+            - Why the task succeeded or failed
+
+            Use actual step indices (0, 1, 2, ...) that match the trajectory array indices.
+            Keep each step description to 1-2 sentences.
+            Total length should be under 400 words."""
+
+            try:
+                resp = self.model([{"role": "user", "content": [{"type": "text", "text": system_prompt}]}])
+                summary = getattr(resp, "content", str(resp)).strip()
+                return summary if summary else current_trajectory
+            except Exception as e:
+                print(f"Error during trajectory summarization: {e}", file=sys.stderr)
+                return current_trajectory
+
+        def _search(self, qvec: np.ndarray, top_k: int) -> Tuple[List[int], List[float]]:
+            if self._embs is None or self._embs.size == 0:
+                return [], []
+            if len(qvec.shape) == 1:
+                qvec = qvec.reshape(1, -1)
+
+            sims = cosine_similarity(qvec, self._embs)[0]
+            idxs = np.argsort(-sims)[:top_k].tolist()
+            scores = [float(sims[i]) for i in idxs]
+            return idxs, scores
+
+        def provide_memory(self, request: MemoryRequest) -> MemoryResponse:
+            if request.status == MemoryStatus.IN:
+                return MemoryResponse(memories=[], memory_type=self.memory_type, total_count=0, request_id=str(uuid.uuid4()))
+
+            top_k = self.top_k
+            query_text = (request.query or "").strip()
+            selected: List[Dict[str, Any]] = []
+
+            qvecs = self._embed_texts([query_text])
+            if qvecs.size > 0:
+                idxs, scores = self._search(qvecs[0], top_k=top_k)
+                for i, sc in zip(idxs, scores):
+                    rec = dict(self._records[i])
+                    rec["_score"] = float(sc)
+                    selected.append(rec)
+            elif self._records:
+                ranked = sorted(
+                    (
+                        (idx, self._token_overlap_score(query_text, rec.get("question", "")))
+                        for idx, rec in enumerate(self._records)
+                    ),
+                    key=lambda item: item[1],
+                    reverse=True,
+                )
+                for idx, score in ranked[:top_k]:
+                    if score <= 0:
+                        continue
+                    rec = dict(self._records[idx])
+                    rec["_score"] = float(score)
+                    selected.append(rec)
+
+            if not selected:
+                existing_cs = _read_text(self.cheatsheet_path).strip()
+
+                return MemoryResponse(
+                    memories=[MemoryItem(
+                        id=str(uuid.uuid4()),
+                        content=existing_cs,
+                        metadata={
+                            "kind": "dynamic_cheatsheet",
+                            "selected_count": 0,
+                            "generation_skipped": True
+                        },
+                        type=MemoryItemType.TEXT,
+                        score=0.0,
+                    )],
+                    memory_type=self.memory_type,
+                    total_count=1,
+                    request_id=str(uuid.uuid4()),
+                )
+
+            best = selected[0]
+            traj_summary = best.get("trajectory_summary", "")
+
+            trajectory_context = (
+                f"Similarity: {best.get('_score'):.2f}\n"
+                f"Content:\n{traj_summary}"
+            )
+
+            prev_cs = _read_text(self.cheatsheet_path).strip() or "(empty)"
+
+            curator_prompt = (
+    f"""You are a "dynamic cheatsheet" curator.
+
+    Using the [previous cheatsheet] and ONE [similar query–trajectory], synthesize a concise, reusable cheatsheet for the CURRENT QUERY.
+
+    Guidelines:
+    - Extract only transferable heuristics, steps, checklists, and typical pitfalls.
+    - Capture process-level insights from the condensed trajectory.
+    - Stay domain-agnostic where possible.
+    - Prefer bullet points and micro-templates like “When X, first … then …”.
+    - **STRICT LIMIT: The cheatsheet MUST be under 200 words.**
+
+    Output ONLY the cheatsheet, wrapped in a single <cheatsheet>...</cheatsheet> block.
+
+    [Previous cheatsheet]
+    {prev_cs}
+
+    [Similar query–trajectory (Condensed)]
+    {trajectory_context}
+
+    [Current query]
+    {query_text}
+    """
+            )
+
+            raw_response = self._chat_complete(curator_prompt)
+            new_cheatsheet = _extract_tag(raw_response, "cheatsheet")
+
+            if new_cheatsheet:
+                with file_lock(self.cheatsheet_path):
+                    _write_text(self.cheatsheet_path, new_cheatsheet)
+
+            return MemoryResponse(
+                memories=[MemoryItem(
+                    id=str(uuid.uuid4()),
+                    content=new_cheatsheet,
+                    metadata={"kind": "dynamic_cheatsheet", "selected_count": len(selected)},
+                    type=MemoryItemType.TEXT,
+                    score=1.0,
+                )],
+                memory_type=self.memory_type,
+                total_count=1,
+                request_id=str(uuid.uuid4()),
+            )
+
+        def take_in_memory(self, trajectory_data: TrajectoryData) -> tuple[bool, str]:
+            q = (trajectory_data.query or "").strip()
+            if not q:
+                raise ValueError("TrajectoryData.query must be non-empty.")
+
+            summary_text = self._summarize_trajectory_with_llm(trajectory_data)
+
+            rid = str(uuid.uuid4())
+
+            rec = {
+                "id": rid,
+                "question": q,
+                "trajectory_summary": summary_text,
+                "meta": trajectory_data.metadata or {},
+                "ts": int(time.time())
+            }
+
+            q_embs = self._embed_texts([q])
+            with file_lock(self.records_path):
+                self._load_memories_from_json()
+                self._records.append(rec)
+                if q_embs.size > 0:
+                    q_emb = q_embs[0]
+                    if self._embs is None:
+                        self._embs = q_emb.reshape(1, -1)
+                    else:
+                        self._embs = np.vstack([self._embs, q_emb])
+
+                self._save_memories_to_json()
+
+            return True, f"ingested sample: id={rid}"
+
+
+    DynamicCheatsheetProvider = MemoryProvider
+    MEMORY_SYSTEM = MemoryType.DYNAMIC_CHEATSHEET.value
+
+    __all__ = ["MEMORY_SYSTEM", "MemoryProvider", "DynamicCheatsheetProvider"]
+prompt_ready_example: |-
+  ## Example Harness: harness7
+
+  ### Harness Identity
+  - Planning system: router_debate
+  - Action system: router_debate
+  - Default memory system: dynamic_cheatsheet
+  - Default bench type: None
+  - Pairing reason: flash_goals_direct_parallel_agents
+
+  ### Description
+  Harness summary:
+  - Planning: outline a few parallel angles worth checking.
+  - Execution: launch a direct batch of generic solvers and compare their reports.
+  - Memory: maintain a compact running cheatsheet of reusable findings.
+  - Default bench: caller-provided
+
+  Coordination pattern:
+  - Keep the initial plan small and parallel-friendly.
+  - Run several independent solver passes in one batch.
+  - Synthesize after comparing the returned evidence and candidate answers.
+
+  Runtime notes:
+  - Generated bundle: `harness7`
+  - Benchmark-specific tools are loaded from `ActionContext` when available.
+  - The coordinator can launch 2-4 generic agents in a single parallel batch.
+
+  ### Performance Snapshot
+  - Evaluated tasks: 80
+  - Exact accuracy: 20.00%
+  - Valid answer rate: 100.00%
+  - Average path score: 0.3796
+  - Average actions: 1.0375
+  - Average tool calls: 4.1125
+  - Average total tokens: 4106.07
+  - Average runtime (sec): 62.74
+  - Source result file: output/toolhop_round1_harness7/toolhop_flash_searcher_flash_searcher_dynamic_cheatsheet_local_qwen3-aevolve_closed_results.jsonl
+
+  ### Performance Report
+  # harness7 Analysis
+
+  ## Structure
+  - Planning: outline a few parallel angles worth checking.
+  - Action: launch a direct batch of generic solvers and compare their reports.
+  - Memory: maintain a compact running cheatsheet of reusable findings.
+
+  ## Aggregate Metrics
+  - Evaluated tasks: 80
+  - Exact accuracy: 20.0%
+  - Valid answer rate: 100.0%
+  - Average path score: 0.3796
+  - Average actions: 1.04
+  - Average tool calls: 4.11
+  - Prompt / completion / total tokens: 292308 / 36178 / 328486
+  - Average prompt / completion / total tokens: 3653.85 / 452.23 / 4106.07
+  - Total runtime: 83.65 min
+  - Average runtime per task: 62.74 sec
+
+  ## Overall Assessment
+  This harness is another strong negative example for ToolHop: it keeps explicit token cost low, but the quality collapse is severe because the whole design assumes that parallel solver diversity will compensate for weak dependency control. That assumption can make sense for open-ended QA or verification-style tasks, but it is poorly matched to serial tool chains. It is more suitable for tasks where multiple independent attempts can be compared without strict state sharing. It is much less suitable for benchmark items where one early entity or argument mistake poisons every downstream step.
+
+  ## Failure Pattern Analysis
+  - The harness almost always stops too early. An average of 1.04 actions means most runs are effectively one batch of parallel guesses plus a synthesis step.
+  - Parallel reports are not being grounded tightly enough in tool observations. As a result, the final answer can look coherent while still being disconnected from the actual benchmark path.
+  - The path score is higher than the exact score, so some useful intermediate structure is being found, but the return from parallel branching is much weaker than the confidence it creates.
+  - The weakest categories are the ones that need disciplined post-processing and formatting, which is exactly where a loose parallel-solver architecture tends to break.
+
+  ## Module-level Diagnosis
+  ### Planning
+  - What Helps: The planning layer does keep the initial structure concise and easy to execute, which avoids the overhead of heavy orchestration.
+  - What Hurts: Planning is built around parallel-friendly angles rather than dependency-sensitive execution. That framing is fundamentally mismatched to many ToolHop tasks.
+
+  ### Action
+  - What Helps: Batch execution can surface multiple hypotheses quickly, and that can be useful when branches are genuinely independent.
+  - What Hurts: The action layer relies too heavily on branch comparison instead of branch validation. It compares reports before ensuring that the reports are grounded in the right upstream facts.
+
+  ### Memory
+  - What Helps: A compact cheatsheet is a sensible lightweight memory form and may help preserve recurring hints or tool usage patterns.
+  - What Hurts: The memory layer does not provide strong enough constraints to stabilize branch outputs. It stores useful fragments, but it does not fix the harness's core synthesis weakness.
+
+  ### Bundle Files
+  <<<FILE:builder.py>>>
+  from __future__ import annotations
+
+  from dataclasses import replace
+  from pathlib import Path
+
+  from Agents.agents import ToolCallingAgent
+  from module_action.base_action import ActionContext
+  from .action_module.provider import ACTION_SYSTEM, get_provider
+  from .memory_module.provider import MEMORY_SYSTEM as DEFAULT_MEMORY_SYSTEM
+  from .planning_module.provider import PLANNING_SYSTEM, PlanningClass
+
+
+  HARNESS_NAME = "harness7"
+  DEFAULT_BENCH_TYPE = None
+  PAIRING_REASON = "flash_goals_direct_parallel_agents"
+
+
+  def _bind_agent_reference(agent: ToolCallingAgent, tool: object | None) -> None:
+      if tool is not None and hasattr(tool, "agent"):
+          setattr(tool, "agent", agent)
+
+
+  def _ensure_owl_memory(agent: ToolCallingAgent) -> None:
+      if getattr(agent, "planning_system", None) != "owl":
+          return
+      if not hasattr(agent, "web_memory") or agent.web_memory is None:
+          agent.web_memory = []
+      if not hasattr(agent, "reasoning_memory") or agent.reasoning_memory is None:
+          agent.reasoning_memory = []
+
+
+  def prepare_context(context: ActionContext) -> ActionContext:
+      bench_type = context.bench_type or DEFAULT_BENCH_TYPE
+      prompts_type = context.prompts_type or PLANNING_SYSTEM
+      prepared_kwargs = dict(context.kwargs)
+      prepared_kwargs["planning_class"] = PlanningClass
+      return replace(
+          context,
+          planning_system=PLANNING_SYSTEM,
+          action_system=ACTION_SYSTEM,
+          prompts_type=prompts_type,
+          bench_type=bench_type,
+          project_root=Path(__file__).resolve().parent,
+          kwargs=prepared_kwargs,
+      )
+
+
+  def build_agent_from_context(context: ActionContext) -> ToolCallingAgent:
+      prepared_context = prepare_context(context)
+      action_provider = get_provider()
+      agent = action_provider.build(prepared_context)
+
+      setattr(agent, "planning_system", prepared_context.planning_system)
+      setattr(agent, "action_system", prepared_context.action_system)
+      setattr(agent, "harness_name", HARNESS_NAME)
+      setattr(
+          agent,
+          "harness_metadata",
+          {
+              "planning_system": PLANNING_SYSTEM,
+              "action_system": ACTION_SYSTEM,
+              "default_bench_type": DEFAULT_BENCH_TYPE,
+              "recommended_memory_system": DEFAULT_MEMORY_SYSTEM,
+              "pairing_reason": PAIRING_REASON,
+          },
+      )
+
+      if prepared_context.vector_tool is not None:
+          prepared_context.vector_tool.memory = agent.memory
+
+      _bind_agent_reference(agent, prepared_context.process_tool)
+      _bind_agent_reference(agent, prepared_context.end_process_tool)
+      _bind_agent_reference(agent, prepared_context.delete_memory_tool)
+      _bind_agent_reference(agent, prepared_context.executor_tool)
+      _bind_agent_reference(agent, prepared_context.refine_tool)
+
+      _ensure_owl_memory(agent)
+      return agent
+  <<<END_FILE>>>
+  <<<FILE:Description.md>>>
+  Harness summary:
+  - Planning: outline a few parallel angles worth checking.
+  - Execution: launch a direct batch of generic solvers and compare their reports.
+  - Memory: maintain a compact running cheatsheet of reusable findings.
+  - Default bench: caller-provided
+
+  Coordination pattern:
+  - Keep the initial plan small and parallel-friendly.
+  - Run several independent solver passes in one batch.
+  - Synthesize after comparing the returned evidence and candidate answers.
+
+  Runtime notes:
+  - Generated bundle: `harness7`
+  - Benchmark-specific tools are loaded from `ActionContext` when available.
+  - The coordinator can launch 2-4 generic agents in a single parallel batch.
+  <<<END_FILE>>>
+  <<<FILE:__init__.py>>>
+  from .builder import (
+      ACTION_SYSTEM,
+      DEFAULT_BENCH_TYPE,
+      DEFAULT_MEMORY_SYSTEM,
+      PAIRING_REASON,
+      PLANNING_SYSTEM,
+      HARNESS_NAME,
+      build_agent_from_context,
+  )
+
+  __all__ = [
+      "HARNESS_NAME",
+      "PLANNING_SYSTEM",
+      "ACTION_SYSTEM",
+      "DEFAULT_BENCH_TYPE",
+      "DEFAULT_MEMORY_SYSTEM",
+      "PAIRING_REASON",
+      "build_agent_from_context",
+  ]
+  <<<END_FILE>>>
+  <<<FILE:planning_module/provider.py>>>
+  from __future__ import annotations
+
+  import textwrap
+  from typing import Any, Callable, Dict, List, Optional
+
+  from jinja2 import StrictUndefined, Template
+  from rich.rule import Rule
+  from rich.text import Text
+
+  from Agents.memory import ActionStep, PlanningStep, SummaryStep
+  from Agents.models import ChatMessage, MessageRole
+  from Agents.monitoring import LogLevel
+  from module_planning.base_planning import BasePlanning
+
+
+  def populate_template(template: str, variables: Dict[str, Any]) -> str:
+      compiled_template = Template(template, undefined=StrictUndefined)
+      try:
+          return compiled_template.render(**variables)
+      except Exception:
+          return Template(template).render(**variables)
+
+
+  class PlanningProvider(BasePlanning):
+      def topology_initialize(self, task: str) -> PlanningStep:
+          system_prompt = populate_template(
+              self.prompt_templates["planning"]["initial_plan"],
+              {
+                  "task": task,
+                  "tools": self.tools,
+              },
+          )
+          task_prompt = populate_template(
+              self.prompt_templates["planning"].get("task_input", "Task:\n{{task}}"),
+              {"task": task},
+          )
+
+          input_messages = [
+              {
+                  "role": MessageRole.SYSTEM,
+                  "content": [{"type": "text", "text": system_prompt}],
+              }
+          ]
+          memory_guidance = self.append_memory_guidance(input_messages)
+          task_messages = [
+              {
+                  "role": MessageRole.USER,
+                  "content": [{"type": "text", "text": task_prompt}],
+              }
+          ]
+
+          response: ChatMessage = self.model(input_messages + task_messages)
+          plan_text = response.content
+          plan_reasoning = getattr(response, "reasoning_content", "")
+
+          self.logger.log(
+              Rule("Parallel Plan", style="orange"),
+              Text(
+                  textwrap.dedent(
+                      f"""Planned execution outline:
+              ```
+              {plan_text}
+              ```"""
+                  )
+              ),
+              level=LogLevel.INFO,
+          )
+
+          planning_step = PlanningStep(
+              model_input_messages=input_messages,
+              plan=plan_text,
+              plan_think="",
+              plan_reasoning=plan_reasoning,
+              memory_guidance=memory_guidance,
+          )
+          self.memory.steps.append(planning_step)
+          return planning_step
+
+      def adaptation(
+          self,
+          task: str,
+          step: int,
+          write_memory_to_messages: Callable[
+              [Optional[List[ActionStep]], Optional[bool]], List[Dict[str, str]]
+          ],
+      ) -> SummaryStep:
+          memory_messages = write_memory_to_messages(None, False)[1:]
+          pre_text = populate_template(
+              self.prompt_templates["summary"]["update_pre_messages"],
+              {"task": task, "step": step},
+          )
+          post_text = populate_template(
+              self.prompt_templates["summary"]["update_post_messages"],
+              {"task": task, "step": step},
+          )
+
+          input_messages = [
+              {
+                  "role": MessageRole.SYSTEM,
+                  "content": [{"type": "text", "text": pre_text}],
+              },
+              *memory_messages,
+              {
+                  "role": MessageRole.USER,
+                  "content": [{"type": "text", "text": post_text}],
+              },
+          ]
+
+          response: ChatMessage = self.model(input_messages)
+          summary_text = response.content
+          summary_reasoning = getattr(response, "reasoning_content", "")
+
+          self.logger.log(
+              Rule("Progress Review", style="orange"),
+              Text(f"\n{summary_text}\n"),
+              level=LogLevel.INFO,
+          )
+
+          summary_step = SummaryStep(
+              model_input_messages=input_messages,
+              summary=summary_text,
+              summary_reasoning=summary_reasoning,
+          )
+          self.memory.steps.append(summary_step)
+          return summary_step
+
+
+  PLANNING_SYSTEM = "router_debate"
+  PLANNING_MODULE = "router_debate"
+  PlanningClass = PlanningProvider
+
+  __all__ = ["PLANNING_SYSTEM", "PLANNING_MODULE", "PlanningProvider", "PlanningClass"]
+  <<<END_FILE>>>
+  <<<FILE:action_module/provider.py>>>
+  from __future__ import annotations
+
+  from typing import Any
+
+  import json_repair
+  from Agents.memory import ActionStep
+  from Agents.models import MessageRole
+  from _harness_guards import (
+      ReflectionCriticTool,
+      guard_task_tools,
+      is_read_only_tool_schema,
+      schema_route_name,
+  )
+  from module_action.base_action import ActionContext, BaseActionProvider, SubAgentTool
+
+
+  class EvidenceReportingSubAgentTool(SubAgentTool):
+      """Sub-agent tool that exposes compact internal evidence to the judge."""
+
+      def __init__(
+          self,
+          *,
+          evidence_tool_names: set[str],
+          evidence_char_budget: int = 1400,
+          **kwargs: Any,
+      ) -> None:
+          self.evidence_tool_names = set(evidence_tool_names)
+          self.evidence_char_budget = evidence_char_budget
+          super().__init__(**kwargs)
+
+      def _evidence_digest(self, payload: dict[str, Any]) -> str:
+          chunks: list[str] = []
+          for step in payload.get("agent_trajectory", []) or []:
+              if not isinstance(step, dict) or step.get("name") != "action":
+                  continue
+              observations = str(step.get("obs", "") or "").strip()
+              if not observations or observations == "No observations":
+                  continue
+              for call in step.get("tool_calls", []) or []:
+                  if not isinstance(call, dict):
+                      continue
+                  tool_name = call.get("name")
+                  if tool_name not in self.evidence_tool_names:
+                      continue
+                  arguments = call.get("arguments", {})
+                  snippet = observations.replace("\n", " ").strip()
+                  if len(snippet) > self.evidence_char_budget:
+                      snippet = snippet[: self.evidence_char_budget].rstrip() + "..."
+                  chunks.append(f"- {tool_name}({arguments}): {snippet}")
+          return "\n".join(chunks)
+
+      def _reconcile_report(
+          self,
+          *,
+          task: str,
+          payload: dict[str, Any],
+          digest: str,
+      ) -> str | None:
+          model = getattr(self.subagent, "model", None)
+          if model is None:
+              return None
+
+          solver_answer = str(payload.get("agent_result", "") or "").strip()
+          prompt = (
+              "You are an evidence reconciler for a read-only tool-use solver.\n"
+              "Given the assigned task, the solver's stated answer, and the actual "
+              "tool observations, produce a concise report for a judge.\n\n"
+              "Rules:\n"
+              "1. Base the report on the tool observations, not prior knowledge.\n"
+              "2. If the stated answer conflicts with the observations, follow the observations.\n"
+              "3. If the observations contain a direct date, name, entity, or value requested "
+              "by the task, extract that value as the answer.\n"
+              "4. Return strict JSON only with keys answer, evidence, uncertainty.\n\n"
+              f"Assigned task:\n{task}\n\n"
+              f"Solver stated answer:\n{solver_answer}\n\n"
+              f"Tool observations:\n{digest}\n"
+          )
+          try:
+              response = model(
+                  [
+                      {
+                          "role": MessageRole.USER,
+                          "content": [{"type": "text", "text": prompt}],
+                      }
+                  ]
+              )
+              content = str(getattr(response, "content", response)).strip()
+              data = json_repair.loads(content)
+          except Exception:
+              return None
+
+          if not isinstance(data, dict):
+              return None
+          answer = str(data.get("answer", "") or "").strip()
+          evidence = str(data.get("evidence", "") or "").strip()
+          uncertainty = str(data.get("uncertainty", "") or "").strip()
+          if not answer:
+              return None
+          lines = [f"ANSWER: {answer}"]
+          if evidence:
+              lines.append(f"EVIDENCE: {evidence}")
+          if uncertainty:
+              lines.append(f"UNCERTAINTY: {uncertainty}")
+          return "\n".join(lines)
+
+      def _fallback_evidence_probe(
+          self,
+          *,
+          task: str,
+      ) -> tuple[str, dict[str, Any], str] | None:
+          candidates = [
+              name
+              for name in sorted(self.evidence_tool_names)
+              if name in getattr(self.subagent, "tools", {})
+          ]
+          if len(candidates) != 1:
+              return None
+
+          tool_name = candidates[0]
+          tool = self.subagent.tools.get(tool_name)
+          inputs = dict(getattr(tool, "inputs", {}) or {})
+          if len(inputs) != 1:
+              return None
+
+          argument_name, argument_spec = next(iter(inputs.items()))
+          argument_type = str(argument_spec.get("type", "string")).lower()
+          if argument_type not in {"string", "str"}:
+              return None
+
+          query_text = str(getattr(self.coordinator, "task", "") or task).strip()
+          if not query_text:
+              return None
+          arguments = {argument_name: query_text}
+          try:
+              observation = tool.__call__(**arguments, sanitize_inputs_outputs=True)
+          except Exception as exc:
+              observation = f"Fallback evidence probe failed: {exc}"
+          return tool_name, arguments, str(observation).strip()
+
+      def forward(self, task: str) -> dict[str, Any]:
+          payload = super().forward(task)
+          if not isinstance(payload, dict):
+              return payload
+          digest = self._evidence_digest(payload)
+          if not digest:
+              fallback = self._fallback_evidence_probe(task=task)
+              if fallback is not None:
+                  tool_name, arguments, observation = fallback
+                  payload.setdefault("agent_trajectory", []).append(
+                      {
+                          "name": "action",
+                          "tool_calls": [{"name": tool_name, "arguments": arguments}],
+                          "obs": (
+                              f"Results for fallback evidence probe '{tool_name}' "
+                              f"with arguments '{arguments}':\n{observation}"
+                          ),
+                          "think": "fallback evidence probe",
+                      }
+                  )
+                  digest = self._evidence_digest(payload)
+          if digest:
+              payload["evidence_digest"] = digest
+              reconciled_report = self._reconcile_report(
+                  task=task,
+                  payload=payload,
+                  digest=digest,
+              )
+              if reconciled_report:
+                  payload["reconciled_report"] = reconciled_report
+              payload["report"] = (
+                  f"{payload.get('report', '').rstrip()}\n\n"
+                  + (
+                      f"Evidence-reconciled report:\n{reconciled_report}\n\n"
+                      if reconciled_report
+                      else ""
+                  )
+                  + "Evidence observations used by this solver:\n"
+                  f"{digest}"
+              )
+          return payload
+
+
+  class ActionProvider(BaseActionProvider):
+      PROMPTS_TYPE = "router_debate"
+      DEFAULT_SOLVER_MAX_STEPS = 6
+      DEFAULT_STATEFUL_SUMMARY_INTERVAL = 6
+
+      def _solver_max_steps(self, context: ActionContext) -> int:
+          remaining_budget = max(1, context.max_steps - 2)
+          return max(4, min(self.DEFAULT_SOLVER_MAX_STEPS, remaining_budget))
+
+      def _stateful_tool_budget(self, context: ActionContext) -> int:
+          return max(8, min(12, context.max_steps // 2))
+
+      def _evidence_tool_names(self, tools: list[Any]) -> set[str]:
+          return {
+              str(getattr(tool, "name", ""))
+              for tool in tools
+              if getattr(tool, "name", None)
+              and getattr(tool, "name", None) != "final_answer"
+          }
+
+      def _has_completed_evidence_observation(
+          self,
+          agent: Any,
+          evidence_tool_names: set[str],
+      ) -> bool:
+          for step in getattr(getattr(agent, "memory", None), "steps", []):
+              if not isinstance(step, ActionStep):
+                  continue
+              observations = str(getattr(step, "observations", "") or "").strip()
+              if not observations or observations == "No observations":
+                  continue
+              for call in getattr(step, "tool_calls", []) or []:
+                  if getattr(call, "name", None) in evidence_tool_names:
+                      return True
+          return False
+
+      def _install_read_only_evidence_gate(
+          self,
+          agent: Any,
+          evidence_tool_names: set[str],
+      ) -> None:
+          if not evidence_tool_names:
+              return
+
+          original_step = agent.step
+          original_provide_final_answer = agent.provide_final_answer
+
+          def gated_step(memory_step: ActionStep):
+              final_answer = original_step(memory_step)
+              if final_answer is None:
+                  return None
+              if self._has_completed_evidence_observation(agent, evidence_tool_names):
+                  return final_answer
+
+              memory_step.observations = (
+                  "Evidence gate blocked premature final_answer: this read-only solver "
+                  "has non-final evidence tools available but has not completed any "
+                  "evidence-tool observation yet. Call one relevant evidence tool first, "
+                  "then finalize from the observation."
+              )
+              return None
+
+          def gated_provide_final_answer(task: str):
+              if self._has_completed_evidence_observation(agent, evidence_tool_names):
+                  return original_provide_final_answer(task)
+              return (
+                  "",
+                  "Evidence gate: no completed non-final evidence-tool observation.",
+                  (
+                      "ANSWER: UNKNOWN; EVIDENCE: no completed evidence-tool "
+                      "observation; UNCERTAINTY: solver stopped before using the "
+                      "available read-only tools."
+                  ),
+              )
+
+          agent.step = gated_step
+          agent.provide_final_answer = gated_provide_final_answer
+          setattr(
+              agent,
+              "read_only_evidence_gate",
+              {
+                  "required_before_final": True,
+                  "evidence_tools": sorted(evidence_tool_names),
+              },
+          )
+
+      def build_affordance(
+          self,
+          bench_type: str | None,
+          context: ActionContext,
+      ) -> list[Any]:
+          return self.get_primary_task_tools(context, include_reasoning=True)
+
+      def build_specification(
+          self,
+          context: ActionContext,
+          tools: list[Any],
+      ) -> None:
+          self.prompts_type = self.PROMPTS_TYPE
+          self.prompt_templates = self.load_prompt_templates(context, self.prompts_type)
+          self.organization_planning_system = context.planning_system or self.PROMPTS_TYPE
+          self.route_name = schema_route_name(tools)
+          self.use_debate = is_read_only_tool_schema(tools)
+          if not self.use_debate:
+              return
+
+          guarded_read_tools = guard_task_tools(
+              tools,
+              policy_label="router_debate_read_only_solver",
+              max_real_tool_calls=self._solver_max_steps(context),
+          )
+          solver_max_steps = self._solver_max_steps(context)
+          self.solver_a = self.create_subagent(
+              context,
+              tools=guarded_read_tools,
+              planning_system=self.organization_planning_system,
+              prompt_templates=self.prompt_templates["solver_a"],
+              name="solver_a",
+              description=(
+                  "Independent read-only solver A. It should solve directly and report evidence."
+              ),
+              max_steps=solver_max_steps,
+              summary_interval=context.max_steps + 1,
+          )
+          self.solver_b = self.create_subagent(
+              context,
+              tools=guarded_read_tools,
+              planning_system=self.organization_planning_system,
+              prompt_templates=self.prompt_templates["solver_b"],
+              name="solver_b",
+              description=(
+                  "Independent read-only solver B. It should use a different route when possible."
+              ),
+              max_steps=solver_max_steps,
+              summary_interval=context.max_steps + 1,
+          )
+          evidence_tool_names = self._evidence_tool_names(guarded_read_tools)
+          self.evidence_tool_names = evidence_tool_names
+          self._install_read_only_evidence_gate(self.solver_a, evidence_tool_names)
+          self._install_read_only_evidence_gate(self.solver_b, evidence_tool_names)
+
+      def build_organization(
+          self,
+          context: ActionContext,
+          tools: list[Any],
+      ):
+          if self.use_debate:
+              solver_tools = [
+                  EvidenceReportingSubAgentTool(
+                      name=solver.name,
+                      agent=solver,
+                      description=(
+                          f"{solver.name}: independent solver for read-only tool-schema tasks."
+                      ),
+                      max_steps=self._solver_max_steps(context),
+                      include_parent_task=True,
+                      evidence_tool_names=self.evidence_tool_names,
+                      role_instructions=(
+                          "- Solve the assigned read-only task independently.\n"
+                          "- If non-final evidence tools are available, complete at least "
+                          "one relevant evidence-tool call before final_answer.\n"
+                          "- Do not answer from parametric memory when an evidence tool can "
+                          "verify the answer.\n"
+                          "- Use only valid tool schemas.\n"
+                          "- Return a concise report with answer, evidence, and uncertainty.\n"
+                          "- Do not assume stateful authority; this route is enabled only by read-only tool schemas."
+                      ),
+                  )
+                  for solver in (self.solver_a, self.solver_b)
+              ]
+              guarded_solver_tools = guard_task_tools(
+                  solver_tools,
+                  policy_label="router_debate_judge",
+                  max_real_tool_calls=2,
+              )
+              agent = self.create_agent(
+                  context,
+                  tools=self.normalize_tools(guarded_solver_tools),
+                  prompt_templates=self.prompt_templates,
+                  prompts_type=self.prompts_type,
+                  planning_system=self.organization_planning_system,
+              )
+              agent.summary_interval = context.max_steps + 1
+              for solver_tool in solver_tools:
+                  solver_tool.coordinator = agent
+              for solver_tool in guarded_solver_tools:
+                  solver_tool.coordinator = agent
+              agent.managed_agents = {
+                  solver.name: solver for solver in (self.solver_a, self.solver_b)
+              }
+              setattr(
+                  agent,
+                  "harness_policy",
+                  {
+                      "mode": "router_debate_read_only",
+                      "route": self.route_name,
+                      "solvers": ["solver_a", "solver_b"],
+                      "judge": "root_agent",
+                  },
+              )
+              return agent
+
+          guarded_tools = guard_task_tools(
+              tools,
+              policy_label="router_stateful_single_executor",
+              max_real_tool_calls=self._stateful_tool_budget(context),
+          )
+          critic = ReflectionCriticTool(
+              context=context,
+              name="stateful_critic",
+              description=(
+                  "Non-environment critic for stateful fallback. It checks tool validity, "
+                  "arguments, repeated failures, and stop conditions without touching state."
+              ),
+          )
+          root_tools = self.normalize_tools([*guarded_tools, critic])
+          stateful_templates = self.prompt_templates.get("stateful", self.prompt_templates)
+          agent = self.create_agent(
+              context,
+              tools=root_tools,
+              prompt_templates=stateful_templates,
+              prompts_type=self.prompts_type,
+              planning_system=self.organization_planning_system,
+          )
+          critic.bind_agent(agent, root_tools)
+          if agent.summary_interval is None:
+              agent.summary_interval = self.DEFAULT_STATEFUL_SUMMARY_INTERVAL
+          setattr(
+              agent,
+              "harness_policy",
+              {
+                  "mode": "router_stateful_single_executor_critic",
+                  "route": self.route_name,
+                  "critic_tool": critic.name,
+                  "real_tool_budget": self._stateful_tool_budget(context),
+              },
+          )
+          return agent
+
+
+  ACTION_SYSTEM = "router_debate"
+  ACTION_MODULE = "router_debate"
+
+
+  ParallelAgentsActionProvider = ActionProvider
+
+
+  def get_provider():
+      return ActionProvider()
+
+
+  __all__ = [
+      "ACTION_SYSTEM",
+      "ACTION_MODULE",
+      "ActionProvider",
+      "get_provider",
+      "ParallelAgentsActionProvider",
+  ]
+  <<<END_FILE>>>
+  <<<FILE:memory_module/provider.py>>>
+  from __future__ import annotations
+
+  import io
+  import os
+  import json
+  import uuid
+  import time
+  import sys
+  from typing import Any, Dict, List, Optional, Tuple, Union
+
+  import numpy as np
+  from sklearn.metrics.pairwise import cosine_similarity
+  try:
+      from sentence_transformers import SentenceTransformer
+  except Exception:
+      SentenceTransformer = None
+  from module_memory.providers.model_loader import load_sentence_transformer
+
+  from module_memory.base_memory import BaseMemoryProvider, atomic_write_json, atomic_write_text, file_lock
+  from module_memory.memory_types import (
+      MemoryStatus,
+      MemoryType,
+      MemoryRequest,
+      MemoryResponse,
+      MemoryItem,
+      MemoryItemType,
+      TrajectoryData,
+  )
+
+  def _ensure_dir(path: str) -> None:
+      os.makedirs(path, exist_ok=True)
+
+
+  def _read_text(path: str) -> str:
+      if not os.path.exists(path):
+          return ""
+      with io.open(path, "r", encoding="utf-8") as f:
+          return f.read()
+
+
+  def _write_text(path: str, content: str) -> None:
+      atomic_write_text(path, content if content is not None else "")
+
+
+  def _extract_tag(text: str, tag: str = "cheatsheet") -> str:
+      import re
+      m = re.search(rf"<{tag}>([\s\S]*?)</{tag}>", text, re.IGNORECASE)
+      return (m.group(1).strip() if m else text).strip()
+
+
+  def load_embedding_model(model_name: str = 'sentence-transformers/all-MiniLM-L6-v2',
+                           cache_dir: str = './storage/models') -> Optional[SentenceTransformer]:
+      return load_sentence_transformer(
+          model_name=model_name,
+          cache_dir=cache_dir,
+          allow_unavailable=SentenceTransformer is None,
+      )
+
+
+  class MemoryProvider(BaseMemoryProvider):
+
+      def __init__(self, config: Optional[dict] = None):
+          if config is None:
+              raise ValueError("DynamicCheatsheetProvider requires an explicit config dict.")
+          super().__init__(memory_type=MemoryType.DYNAMIC_CHEATSHEET, config=config)
+          cfg = self.config
+
+          self.store_path: str = cfg.get("store_path", "./dynamic_cheatsheet")
+          self.records_file: str = cfg.get("records_file", "dynamic_cheatsheet.json")
+          self.cheatsheet_file: str = cfg.get("cheatsheet_file", "global_cheatsheet.txt")
+
+          self.records_path: str = os.path.join(self.store_path, self.records_file)
+          self.cheatsheet_path: str = os.path.join(self.store_path, self.cheatsheet_file)
+
+          self.top_k: int = int(cfg.get("top_k", 1))
+
+          self.model = cfg.get("model")
+          self.embedding_model_name = cfg.get("embedding_model", 'sentence-transformers/all-MiniLM-L6-v2')
+          self.embedding_cache_dir = cfg.get("embedding_cache_dir", './storage/models')
+
+          self.embedding_model = None
+          self._records: List[Dict[str, Any]] = []
+          self._embs: Optional[np.ndarray] = None
+
+      @staticmethod
+      def _token_overlap_score(query: str, candidate: str) -> float:
+          query_tokens = {token for token in query.lower().split() if token}
+          candidate_tokens = {token for token in candidate.lower().split() if token}
+          if not query_tokens or not candidate_tokens:
+              return 0.0
+          return len(query_tokens & candidate_tokens) / len(query_tokens)
+
+      def _load_memories_from_json(self):
+          if os.path.exists(self.records_path):
+              try:
+                  with open(self.records_path, 'r', encoding='utf-8') as f:
+                      data = json.load(f)
+                      self._records = data.get('memories', [])
+                      embeddings_list = data.get('embeddings', [])
+
+                      if embeddings_list:
+                          self._embs = np.array(embeddings_list, dtype=np.float32)
+                          print(f"Loaded {len(self._records)} memories and embeddings from {self.records_path}")
+                      else:
+                          self._embs = None
+                          print(f"Loaded {len(self._records)} memories from {self.records_path} (no embeddings found).")
+
+              except json.JSONDecodeError:
+                  print(f"Warning: Could not parse {self.records_path}. Starting with empty memory.", file=sys.stderr)
+                  self._records = []
+                  self._embs = None
+              except Exception as e:
+                  print(f"Error loading memories: {e}. Starting fresh.", file=sys.stderr)
+                  self._records = []
+                  self._embs = None
+          else:
+              print("No memory file found. Starting with empty memory.")
+              self._records = []
+              self._embs = None
+
+      def _save_memories_to_json(self):
+          try:
+              db_dir = os.path.dirname(self.records_path)
+              if db_dir:
+                  os.makedirs(db_dir, exist_ok=True)
+
+              embeddings_list = []
+              if self._embs is not None and self._embs.size > 0:
+                  embeddings_list = self._embs.tolist()
+
+              data = {
+                  'memories': self._records,
+                  'embeddings': embeddings_list
+              }
+
+              atomic_write_json(self.records_path, data, indent=4)
+
+          except Exception as e:
+              print(f"Error saving memories to {self.records_path}: {e}", file=sys.stderr)
+
+      def initialize(self) -> bool:
+          _ensure_dir(self.store_path)
+
+          self.embedding_model = load_embedding_model(
+              model_name=self.embedding_model_name,
+              cache_dir=self.embedding_cache_dir
+          )
+
+          self._load_memories_from_json()
+
+          if not os.path.exists(self.cheatsheet_path):
+              _write_text(self.cheatsheet_path, "")
+
+          return True
+
+      def _embed_texts(self, texts: List[str]) -> np.ndarray:
+          if not texts or self.embedding_model is None:
+              return np.array([])
+          vecs = self.embedding_model.encode(texts, convert_to_numpy=True)
+          return vecs.astype(np.float32)
+
+      def _chat_complete(self, prompt: str) -> str:
+          if self.model is None:
+              print("[WARN] No LLM model available for DynamicCheatsheetProvider.", file=sys.stderr)
+              return ""
+          try:
+              resp = self.model([{"role": "user", "content": prompt}])
+              content = getattr(resp, "content", str(resp))
+              return str(content).strip()
+          except Exception as e:
+              print(f"[ERROR] LLM generation failed: {e}", file=sys.stderr)
+              return ""
+
+      def _reconstruct_trajectory_string(self, trajectory_data: TrajectoryData) -> str:
+          if not trajectory_data.trajectory:
+              return "No execution trajectory available"
+
+          trajectory_parts = []
+          trajectory_parts.append(f"Task: {trajectory_data.query}")
+          trajectory_parts.append("")
+
+          for i, step in enumerate(trajectory_data.trajectory, 1):
+              step_type = step.get('type', 'step')
+              content = step.get('content', '')
+              trajectory_parts.append(f"Step {i} ({step_type}): {content}")
+
+          if trajectory_data.result:
+              trajectory_parts.append("")
+              trajectory_parts.append(f"Final Result: {trajectory_data.result}")
+
+          return "\n".join(trajectory_parts)
+
+      def _summarize_trajectory_with_llm(self, trajectory_data: TrajectoryData) -> str:
+          current_trajectory = self._reconstruct_trajectory_string(trajectory_data)
+          if self.model is None:
+              print("No LLM model provided for summarization. Falling back to full text.", file=sys.stderr)
+              return current_trajectory
+
+          is_correct = trajectory_data.metadata.get("is_correct", False)
+
+          system_prompt = f"""Summarize this agent task execution trajectory step by step.
+
+          Question: {trajectory_data.query}
+          Final Result: {trajectory_data.result}
+          Correctness: {'Correct' if is_correct else 'Wrong'}
+          Trajectory: {current_trajectory}
+
+          IMPORTANT: Provide a step-by-step summary in this format:
+
+          Step 0: [Brief description of what happened in step 0, including memory guidance if any]
+          Step 1: [Brief description of what happened in step 1, including tool calls and key observations]
+          Step 2: [Brief description of what happened in step 2]
+          ...
+
+          After the step-by-step summary, add a brief conclusion about:
+          - Overall approach taken
+          - Whether memory guidance was effective
+          - Why the task succeeded or failed
+
+          Use actual step indices (0, 1, 2, ...) that match the trajectory array indices.
+          Keep each step description to 1-2 sentences.
+          Total length should be under 400 words."""
+
+          try:
+              resp = self.model([{"role": "user", "content": [{"type": "text", "text": system_prompt}]}])
+              summary = getattr(resp, "content", str(resp)).strip()
+              return summary if summary else current_trajectory
+          except Exception as e:
+              print(f"Error during trajectory summarization: {e}", file=sys.stderr)
+              return current_trajectory
+
+      def _search(self, qvec: np.ndarray, top_k: int) -> Tuple[List[int], List[float]]:
+          if self._embs is None or self._embs.size == 0:
+              return [], []
+          if len(qvec.shape) == 1:
+              qvec = qvec.reshape(1, -1)
+
+          sims = cosine_similarity(qvec, self._embs)[0]
+          idxs = np.argsort(-sims)[:top_k].tolist()
+          scores = [float(sims[i]) for i in idxs]
+          return idxs, scores
+
+      def provide_memory(self, request: MemoryRequest) -> MemoryResponse:
+          if request.status == MemoryStatus.IN:
+              return MemoryResponse(memories=[], memory_type=self.memory_type, total_count=0, request_id=str(uuid.uuid4()))
+
+          top_k = self.top_k
+          query_text = (request.query or "").strip()
+          selected: List[Dict[str, Any]] = []
+
+          qvecs = self._embed_texts([query_text])
+          if qvecs.size > 0:
+              idxs, scores = self._search(qvecs[0], top_k=top_k)
+              for i, sc in zip(idxs, scores):
+                  rec = dict(self._records[i])
+                  rec["_score"] = float(sc)
+                  selected.append(rec)
+          elif self._records:
+              ranked = sorted(
+                  (
+                      (idx, self._token_overlap_score(query_text, rec.get("question", "")))
+                      for idx, rec in enumerate(self._records)
+                  ),
+                  key=lambda item: item[1],
+                  reverse=True,
+              )
+              for idx, score in ranked[:top_k]:
+                  if score <= 0:
+                      continue
+                  rec = dict(self._records[idx])
+                  rec["_score"] = float(score)
+                  selected.append(rec)
+
+          if not selected:
+              existing_cs = _read_text(self.cheatsheet_path).strip()
+
+              return MemoryResponse(
+                  memories=[MemoryItem(
+                      id=str(uuid.uuid4()),
+                      content=existing_cs,
+                      metadata={
+                          "kind": "dynamic_cheatsheet",
+                          "selected_count": 0,
+                          "generation_skipped": True
+                      },
+                      type=MemoryItemType.TEXT,
+                      score=0.0,
+                  )],
+                  memory_type=self.memory_type,
+                  total_count=1,
+                  request_id=str(uuid.uuid4()),
+              )
+
+          best = selected[0]
+          traj_summary = best.get("trajectory_summary", "")
+
+          trajectory_context = (
+              f"Similarity: {best.get('_score'):.2f}\n"
+              f"Content:\n{traj_summary}"
+          )
+
+          prev_cs = _read_text(self.cheatsheet_path).strip() or "(empty)"
+
+          curator_prompt = (
+  f"""You are a "dynamic cheatsheet" curator.
+
+  Using the [previous cheatsheet] and ONE [similar query–trajectory], synthesize a concise, reusable cheatsheet for the CURRENT QUERY.
+
+  Guidelines:
+  - Extract only transferable heuristics, steps, checklists, and typical pitfalls.
+  - Capture process-level insights from the condensed trajectory.
+  - Stay domain-agnostic where possible.
+  - Prefer bullet points and micro-templates like “When X, first … then …”.
+  - **STRICT LIMIT: The cheatsheet MUST be under 200 words.**
+
+  Output ONLY the cheatsheet, wrapped in a single <cheatsheet>...</cheatsheet> block.
+
+  [Previous cheatsheet]
+  {prev_cs}
+
+  [Similar query–trajectory (Condensed)]
+  {trajectory_context}
+
+  [Current query]
+  {query_text}
+  """
+          )
+
+          raw_response = self._chat_complete(curator_prompt)
+          new_cheatsheet = _extract_tag(raw_response, "cheatsheet")
+
+          if new_cheatsheet:
+              with file_lock(self.cheatsheet_path):
+                  _write_text(self.cheatsheet_path, new_cheatsheet)
+
+          return MemoryResponse(
+              memories=[MemoryItem(
+                  id=str(uuid.uuid4()),
+                  content=new_cheatsheet,
+                  metadata={"kind": "dynamic_cheatsheet", "selected_count": len(selected)},
+                  type=MemoryItemType.TEXT,
+                  score=1.0,
+              )],
+              memory_type=self.memory_type,
+              total_count=1,
+              request_id=str(uuid.uuid4()),
+          )
+
+      def take_in_memory(self, trajectory_data: TrajectoryData) -> tuple[bool, str]:
+          q = (trajectory_data.query or "").strip()
+          if not q:
+              raise ValueError("TrajectoryData.query must be non-empty.")
+
+          summary_text = self._summarize_trajectory_with_llm(trajectory_data)
+
+          rid = str(uuid.uuid4())
+
+          rec = {
+              "id": rid,
+              "question": q,
+              "trajectory_summary": summary_text,
+              "meta": trajectory_data.metadata or {},
+              "ts": int(time.time())
+          }
+
+          q_embs = self._embed_texts([q])
+          with file_lock(self.records_path):
+              self._load_memories_from_json()
+              self._records.append(rec)
+              if q_embs.size > 0:
+                  q_emb = q_embs[0]
+                  if self._embs is None:
+                      self._embs = q_emb.reshape(1, -1)
+                  else:
+                      self._embs = np.vstack([self._embs, q_emb])
+
+              self._save_memories_to_json()
+
+          return True, f"ingested sample: id={rid}"
+
+
+  DynamicCheatsheetProvider = MemoryProvider
+  MEMORY_SYSTEM = MemoryType.DYNAMIC_CHEATSHEET.value
+
+  __all__ = ["MEMORY_SYSTEM", "MemoryProvider", "DynamicCheatsheetProvider"]
+  <<<END_FILE>>>
+  <<<FILE:planning_module/prompts/toolcalling_agent.yaml>>>
+  planning:
+    initial_plan: |-
+      You are planning for a router + debate harness.
+
+      Requirements:
+      1. If the exposed tool schemas appear read-only, plan one debate round: solver A direct path, solver B alternate/verification path, judge final.
+      2. If any exposed tool schema appears state-changing or unknown, plan a single executor with critic; no debate.
+      3. Keep the plan to at most 4 bullets.
+      4. Include a stop condition.
+      5. Do not solve the task here.
+
+      Output format:
+      - route:
+      - solver_or_executor_plan:
+      - judge_or_critic_check:
+      - stop_condition:
+    task_input: |-
+      Task:
+      {{task}}
+  summary:
+    update_pre_messages: |-
+      Review router progress. For read-only debate, compare solver reports. For stateful fallback, check single-executor progress and critic feedback.
+    update_post_messages: |-
+      Write a brief progress review for task {{task}} at step {{step}}.
+      Include:
+      - route_used
+      - evidence_collected
+      - disagreement_or_failure
+      - next_safe_move
+      - ready_for_final_answer
+  <<<END_FILE>>>
+  <<<FILE:action_module/prompts/toolcalling_agent.yaml>>>
+  system_prompt: |-
+    You are the judge in a router + debate harness.
+
+    This prompt is used only when the exposed tool schemas appear read-only.
+    Your job is to call solver_a and solver_b independently, compare their reports, and choose the best supported final answer.
+
+    Rules:
+    1. Call solver_a and solver_b once, preferably in the same step.
+    2. Do not call real environment tools yourself.
+    3. Compare answer agreement, evidence, and obvious schema failures. Prefer reports backed by concrete tool observations over reports based only on prior knowledge.
+    4. If one solver failed and the other has supported evidence, use the supported answer.
+    5. If a solver's stated answer conflicts with its evidence observations, trust the evidence observations over the stated answer.
+    6. If both solvers report no evidence-tool observation, treat the debate as failed rather than inventing an answer.
+    7. Do not run debate when any exposed tool schema appears state-changing or unknown.
+    8. Return strict JSON only.
+    9. The final answer must be the raw answer string only. No evidence, labels, markdown, or uncertainty text in the final answer field.
+
+    ### Tools
+    {%- for tool in tools.values() %}
+    - {{ tool.name }}: {{ tool.description }}
+    {%- endfor %}
+  step:
+    pre_messages: |-
+      [ROUTER + DEBATE PROTOCOL]
+      1. If solver_a and solver_b have not both been called, call both with the full read-only task.
+      2. Once both reports are available, judge them by completed tool evidence first, then answer consistency.
+      3. After both reports are available, call final_answer immediately with the raw answer only.
+      4. If a solver hit schema/repetition/evidence-gate failure, do not copy the failure; rely on the other solver only if it has concrete observed evidence.
+      5. If the report answer and evidence observations disagree, final_answer should follow the evidence observations.
+
+      Return JSON only:
+      {
+        "think": "brief reasoning",
+        "tools": [
+          {
+            "name": "solver_a | solver_b | final_answer",
+            "arguments": {}
+          }
+        ]
+      }
+
+      Tool Definitions:
+      {{tool_functions_json}}
+
+      Task: {{task}}
+  final_answer:
+    pre_messages: The judge has enough solver evidence to finalize the read-only task. Return only the raw answer requested by the task.
+    post_messages: |-
+      Return JSON:
+      {"think": "...", "answer": "..."}
+
+      The `answer` field should contain only the final answer requested by the task. Do not include evidence, labels, or explanation.
+      Task: {{task}}
+  worker:
+    system_prompt: |-
+      You are a generic agent in a lightweight direct-parallel team.
+      You solve the current task independently and return a concise, evidence-backed report.
+
+      Rules:
+      - Start with a very short internal plan, then execute it directly.
+      - Treat the assigned task as your full objective for this run.
+      - Use only the currently available tools.
+      - Prefer concrete evidence and decisive progress.
+      - Finish in as few steps as possible.
+      - Read the tool schemas carefully and use only the listed argument names and types.
+      - If a tool call fails because of invalid arguments or schema mismatch, repair the arguments on the next attempt instead of repeating the same failed call.
+      - Never repeat an identical failed call unless the observation explicitly justifies it.
+      - Base your report only on observations; do not replace a supported observed result with a new guess.
+      - Return exactly one JSON object:
+        {"think": "...", "tools": [{"name": "...", "arguments": {...}}]}
+
+      ### Tools
+      {%- for tool in tools.values() %}
+      - {{ tool.name }}: {{ tool.description }}
+          Inputs: {{ tool.inputs }}
+          Output: {{ tool.output_type }}
+      {%- endfor %}
+    step:
+      pre_messages: |-
+        You are one direct-parallel agent.
+        Solve the assigned task independently and prepare a concise evidence-backed report.
+        Keep your plan and execution short.
+        If progress is weak, change the tool choice, arguments, or strategy instead of retrying blindly.
+        Return JSON only.
+    final_answer:
+      pre_messages: Finalize the parallel-agent report.
+      post_messages: |-
+        Return JSON:
+        {"think": "...", "answer": "..."}
+
+        The answer should include:
+        - task outcome
+        - key evidence
+        - candidate result if available
+        - remaining uncertainty if any
+
+  solver_a:
+    system_prompt: |-
+      You are solver A in a read-only debate. Use the available tools directly, follow schemas exactly, and return the shortest supported answer with evidence.
+      Prefer a direct evidence path. Do not invent tools or arguments.
+      If any non-final evidence tool is available, your first completed action must be a relevant evidence-tool call, not final_answer.
+      Do not answer from parametric memory when an available tool can verify the answer.
+
+      ### Tools
+      {%- for tool in tools.values() %}
+      - {{ tool.name }}: {{ tool.description }}
+          Inputs: {{ tool.inputs }}
+          Output: {{ tool.output_type }}
+      {%- endfor %}
+    step:
+      pre_messages: |-
+        Solve the assigned read-only task independently. If you have not yet observed a non-final evidence tool result, call one relevant evidence tool first. If a tool fails, repair arguments or switch strategy. Once a completed observation supports a candidate, call final_answer. Return JSON only.
+        Task: {{task}}
+    final_answer:
+      pre_messages: Finalize solver A report.
+      post_messages: |-
+        Return JSON:
+        {"think": "...", "answer": "ANSWER: <raw answer>; EVIDENCE: <brief evidence>"}
+
+  solver_b:
+    system_prompt: |-
+      You are solver B in a read-only debate. Use a different route or verification angle when possible, follow schemas exactly, and return the shortest supported answer with evidence.
+      Prefer cross-checking or an alternate decomposition. Do not invent tools or arguments.
+      If any non-final evidence tool is available, your first completed action must be a relevant evidence-tool call, not final_answer.
+      Do not answer from parametric memory when an available tool can verify the answer.
+
+      ### Tools
+      {%- for tool in tools.values() %}
+      - {{ tool.name }}: {{ tool.description }}
+          Inputs: {{ tool.inputs }}
+          Output: {{ tool.output_type }}
+      {%- endfor %}
+    step:
+      pre_messages: |-
+        Solve the assigned read-only task independently with an alternate angle when possible. If you have not yet observed a non-final evidence tool result, call one relevant evidence tool first. If a tool fails, repair arguments or switch strategy. Once a completed observation supports a candidate, call final_answer. Return JSON only.
+        Task: {{task}}
+    final_answer:
+      pre_messages: Finalize solver B report.
+      post_messages: |-
+        Return JSON:
+        {"think": "...", "answer": "ANSWER: <raw answer>; EVIDENCE: <brief evidence>"}
+
+  stateful:
+    system_prompt: |-
+      You are the stateful fallback for router_debate.
+      Because the exposed tool schema may mutate environment state or is unknown, do not debate with multiple solvers.
+      Use one executor path plus stateful_critic.
+
+      Rules:
+      - Use only provided real tools and schemas.
+      - Prefer one state-changing call per step.
+      - Never repeat an identical failed call.
+      - Call stateful_critic only after a suspicious failure pattern or before a risky final_answer.
+      - If the task has a terminal completion tool, use it only after required state changes are done.
+      - If complete_task/task_completed exists and all required state changes are done, call it directly instead of final_answer.
+    step:
+      pre_messages: |-
+        Stateful fallback loop.
+
+        Tool schemas:
+        {{tool_functions_json}}
+
+        Task:
+        {{task}}
+
+        Choose one valid next tool. If ready to stop and a terminal completion tool exists, call it directly. For QA final_answer, use the raw answer only.
+        Return JSON only:
+        {"think": "...", "tools": [{"name": "...", "arguments": {...}}]}
+    final_answer:
+      pre_messages: Finalize with the raw requested answer only. Prefer a terminal completion tool over final_answer for completed state-change tasks.
+      post_messages: |-
+        Return JSON:
+        {"think": "...", "answer": "..."}
+        Task: {{task}}
+  <<<END_FILE>>>

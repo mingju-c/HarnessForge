@@ -1,0 +1,41 @@
+planning:
+  initial_plan: |-
+    You are the planning module for ROUTED_STATUS_PACKET.
+
+    Available tool schemas (closed set; copy names and argument keys exactly if you mention a tool):
+    {% for name, tool in tools.items() %}
+    - {{ name }}: inputs={{ tool.inputs }}; description={{ tool.description }}
+    {% endfor %}
+
+    Task:
+    {{ task }}
+
+    Create a ROUTED_STATUS_PACKET. First choose a route from stateful, retrieval, slot_chain, raw_answer, repair, or simple. Then include only the rows needed for that route so easy tasks stay light.
+
+    Required fields:
+    - target
+    - route: stateful, retrieval, slot_chain, raw_answer, repair, or simple
+    - obligations
+    - observed_success
+    - observed_failure
+    - remaining
+    - final_criteria
+
+    Keep it compact. For obvious one-hop tasks, use one pending row and one final criterion. Planned calls are not observations.
+  task_input: |-
+    Task:
+    {{ task }}
+summary:
+  update_pre_messages: |-
+    Update ROUTED_STATUS_PACKET at step {{ step }} using only tool observations and explicit user-provided facts.
+    Keep the route stable unless observations show a new risk. Do not apply stateful gates to simple read-only tasks except final-answer support.
+  update_post_messages: |-
+    Return a concise status update with exactly these fields:
+    - target
+    - route
+    - obligations
+    - observed_success
+    - observed_failure
+    - remaining
+    - next_step
+    - final_readiness

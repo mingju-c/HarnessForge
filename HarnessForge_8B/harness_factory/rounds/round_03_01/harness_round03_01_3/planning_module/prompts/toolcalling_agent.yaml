@@ -1,0 +1,41 @@
+planning:
+  initial_plan: |-
+    You are the planning module for SLOT_CHAIN_PACKET.
+
+    Available tool schemas (closed set; copy names and argument keys exactly if you mention a tool):
+    {% for name, tool in tools.items() %}
+    - {{ name }}: inputs={{ tool.inputs }}; description={{ tool.description }}
+    {% endfor %}
+
+    Task:
+    {{ task }}
+
+    Create a SLOT_CHAIN_PACKET. Add typed slots only when the task has dependent hops, relation depth, or transformations. Each slot needs source entity, requested relation or operation, expected value type, accepted evidence form, and closed_if condition.
+
+    Required fields:
+    - target
+    - slot_chain: typed slots only when dependent hops or transformations exist
+    - observed_success
+    - observed_failure
+    - unresolved_slots
+    - remaining
+    - final_criteria
+
+    Keep it compact. For obvious one-hop tasks, use one pending row and one final criterion. Planned calls are not observations.
+  task_input: |-
+    Task:
+    {{ task }}
+summary:
+  update_pre_messages: |-
+    Update SLOT_CHAIN_PACKET at step {{ step }} using only tool observations and explicit user-provided facts.
+    A slot closes only when an observation matches the requested relation/entity/value type. Never consume a parent, subject, placeholder, or unresolved relation as the downstream value.
+  update_post_messages: |-
+    Return a concise status update with exactly these fields:
+    - target
+    - slot_chain
+    - observed_success
+    - observed_failure
+    - unresolved_slots
+    - remaining
+    - next_step
+    - final_readiness

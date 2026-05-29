@@ -1,0 +1,41 @@
+planning:
+  initial_plan: |-
+    You are the planning module for OBSERVED_STATUS_LEDGER.
+
+    Available tool schemas (closed set; copy names and argument keys exactly if you mention a tool):
+    {% for name, tool in tools.items() %}
+    - {{ name }}: inputs={{ tool.inputs }}; description={{ tool.description }}
+    {% endfor %}
+
+    Task:
+    {{ task }}
+
+    Create a compact observed-status ledger. Separate intended obligations from facts confirmed by observations; do not close rows from the task text alone.
+
+    Required fields:
+    - target: concrete requested answer, state, or deliverable
+    - answer_or_state_type: short answer, transformed value, list, or stateful completion
+    - planned_or_pending: required evidence or operations, one row per meaningful target when there are multiple
+    - status_ledger: rows with obligation, status, observed_value, failure_or_blocker, and final_condition
+    - observed_success: empty unless supplied by the user or tool observations
+    - observed_failure: empty unless supplied by the user or tool observations
+    - remaining: what must still be observed, repaired, transformed, verified, or completed
+    - final_criteria: exact condition for final_answer or complete_task
+
+    Keep it short. For obvious one-hop tasks, use one pending row and one final criterion. Do not store task-specific facts beyond the current task.
+  task_input: |-
+    Task:
+    {{ task }}
+summary:
+  update_pre_messages: |-
+    Update OBSERVED_STATUS_LEDGER at step {{ step }} using only tool observations and explicit user-provided facts.
+    Only tool observations or explicit user facts may move a row from pending to observed_success. Failed or ambiguous rows stay open and must drive the next action.
+  update_post_messages: |-
+    Return a concise status update with exactly these fields:
+    - observed_success
+    - observed_failure
+    - status_ledger
+    - remaining
+    - retry_or_repair_guidance
+    - next_step
+    - final_readiness

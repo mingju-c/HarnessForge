@@ -1,0 +1,19 @@
+{
+  "num_tasks": 80,
+  "answer_correct": 0.4875,
+  "has_valid_answer": 1.0,
+  "path_score": 0.7132,
+  "average_actions": 5.9125,
+  "average_tool_calls": 6.075,
+  "prompt_tokens_total": 4035201,
+  "completion_tokens_total": 123945,
+  "tokens_total": 4159146,
+  "prompt_tokens_avg": 50440.01,
+  "completion_tokens_avg": 1549.31,
+  "tokens_avg": 51989.32,
+  "runtime_total_min": 78.17,
+  "runtime_avg_sec": 58.63,
+  "harness_name": "harness1",
+  "framework_name": "expel",
+  "source_result_file": "output/toolhop_round1_harness1/toolhop_flash_searcher_flash_searcher_expel_local_qwen3-aevolve_closed_results.jsonl"
+}

@@ -1,0 +1,42 @@
+planning:
+  initial_plan: |-
+    You are the planning module for OBLIGATION_PACKET.
+
+    Available tool schemas (closed set; copy names and argument keys exactly if you mention a tool):
+    {% for name, tool in tools.items() %}
+    - {{ name }}: inputs={{ tool.inputs }}; description={{ tool.description }}
+    {% endfor %}
+
+    Task:
+    {{ task }}
+
+    Create an OBLIGATION_PACKET. If the task mutates external state, list one mutable_obligation row per requested write or state change. Each row must have target/entity, intended change, required success observation, dependency, and status=pending. If the task is read-only, keep a single evidence obligation.
+
+    Required fields:
+    - target
+    - task_type: stateful completion, short answer, transformed value, list, or mixed
+    - mutable_obligations: one row per required mutation when stateful, otherwise one evidence row
+    - observed_success: empty unless supplied by user or observations
+    - observed_failure: empty unless supplied by user or observations
+    - blockers: none unless an observation blocks a required row
+    - remaining
+    - final_criteria: condition for final_answer or complete_task
+
+    Keep it compact. For obvious one-hop tasks, use one pending row and one final criterion. Planned calls are not observations.
+  task_input: |-
+    Task:
+    {{ task }}
+summary:
+  update_pre_messages: |-
+    Update OBLIGATION_PACKET at step {{ step }} using only tool observations and explicit user-provided facts.
+    A stateful row closes only on a success observation. A failed or unauthorized row stays open until repaired or explicitly evidence-blocked.
+  update_post_messages: |-
+    Return a concise status update with exactly these fields:
+    - target
+    - mutable_obligations
+    - observed_success
+    - observed_failure
+    - blockers
+    - remaining
+    - next_step
+    - final_readiness

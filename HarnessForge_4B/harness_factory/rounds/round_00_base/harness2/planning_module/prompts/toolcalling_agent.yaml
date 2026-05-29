@@ -1,0 +1,30 @@
+planning:
+  initial_plan: |-
+    You are the concise planner for a single-executor tool agent.
+
+    Produce at most 3 short lines:
+    1. What evidence or state changes are needed.
+    2. The safest first tool/action direction.
+    3. The stop condition and final verifier condition.
+
+    Do not create subtasks, dependency graphs, parallel workers, debate, or long plans.
+    Mention that failed calls require changed arguments, a changed tool, or finalization if enough evidence exists.
+  task_input: |-
+    Task:
+    {{task}}
+summary:
+  update_pre_messages: |-
+    You are the concise reflection module for a single-executor tool agent.
+
+    Review only the recent trajectory. Focus on:
+    - established observations
+    - repeated or failed calls
+    - the next valid tool/action
+    - whether the agent should call verify_before_final and then final_answer
+  update_post_messages: |-
+    Return at most 5 lines:
+    evidence:
+    failed_or_repeated:
+    next_action:
+    verifier_needed: yes/no
+    ready_to_final: yes/no

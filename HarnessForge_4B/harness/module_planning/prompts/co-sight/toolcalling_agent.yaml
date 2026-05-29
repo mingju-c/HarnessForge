@@ -1,0 +1,3 @@
+planning:
+  initial_plan: 'Gather diverse perspectives: {"name": "expert_parallel", "arguments": {"task": "{{task}}", "num_expert": 3}}'
+  static_plan: '[{"name": "expert_parallel", "arguments": {"task": "{{task}}", "num_expert": 3}}]'

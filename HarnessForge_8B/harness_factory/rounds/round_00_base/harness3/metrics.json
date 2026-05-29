@@ -1,0 +1,19 @@
+{
+  "num_tasks": 80,
+  "answer_correct": 0.4125,
+  "has_valid_answer": 1.0,
+  "path_score": 0.6132,
+  "average_actions": 2.0,
+  "average_tool_calls": 2.0,
+  "prompt_tokens_total": 1690650,
+  "completion_tokens_total": 29588,
+  "tokens_total": 1720238,
+  "prompt_tokens_avg": 21133.12,
+  "completion_tokens_avg": 369.85,
+  "tokens_avg": 21502.97,
+  "runtime_total_min": 121.63,
+  "runtime_avg_sec": 91.22,
+  "harness_name": "harness3",
+  "framework_name": "skillweaver",
+  "source_result_file": "output/toolhop_round1_harness3/toolhop_flash_searcher_flash_searcher_skillweaver_local_qwen3-aevolve_closed_results.jsonl"
+}

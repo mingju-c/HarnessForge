@@ -1,0 +1,41 @@
+planning:
+  initial_plan: |-
+    You are the planning module for STATEFUL_COMMIT_LEDGER.
+
+    Available tool schemas (closed set; copy names and argument keys exactly if you mention a tool):
+    {% for name, tool in tools.items() %}
+    - {{ name }}: inputs={{ tool.inputs }}; description={{ tool.description }}
+    {% endfor %}
+
+    Task:
+    {{ task }}
+
+    Create a compact commit ledger for stateful or multi-operation work. Each row should name the target object/entity, required mutation or verification, dependency, observed ID/value slot, and status=pending.
+
+    Required fields:
+    - target: concrete requested answer, state, or deliverable
+    - answer_or_state_type: short answer, transformed value, list, or stateful completion
+    - planned_or_pending: required evidence or operations, one row per meaningful target when there are multiple
+    - commit_ledger: required operation rows with target object, observed ID/value, dependency, success/failure, and terminal contribution
+    - observed_success: empty unless supplied by the user
+    - observed_failure: empty unless supplied by the user
+    - remaining: what must still be observed or repaired
+    - final_criteria: exact condition for final_answer or complete_task
+
+    Keep it short. For obvious one-hop tasks, use one pending row and one final criterion.
+  task_input: |-
+    Task:
+    {{ task }}
+summary:
+  update_pre_messages: |-
+    Update STATEFUL_COMMIT_LEDGER at step {{ step }} using only tool observations and explicit user-provided facts.
+    Only successful observations can close commit rows. Keep failed or unobserved rows open and propose the next direct repair or verification.
+  update_post_messages: |-
+    Return a concise status update with exactly these fields:
+    - observed_success
+    - observed_failure
+    - commit_ledger
+    - remaining
+    - retry_or_repair_guidance
+    - next_step
+    - final_readiness

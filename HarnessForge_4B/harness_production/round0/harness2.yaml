@@ -1,0 +1,2897 @@
+metadata:
+  harness_name: harness2
+  default_bench_type: null
+  pairing_reason: fallback_single_react
+  planning_system: concise_reflection
+  action_system: concise_reflection
+  default_memory_system: agent_kb
+  source_root: harness_factory/rounds/round_00_base/harness2
+artifact_paths:
+  harness_root: harness_factory/rounds/round_00_base/harness2
+  description_path: harness_factory/rounds/round_00_base/harness2/Description.md
+  report_path: harness_factory/rounds/round_00_base/harness2/report.md
+  metrics_path: harness_factory/rounds/round_00_base/harness2/metrics.json
+description_markdown: |-
+  Harness summary:
+  - Planning: explicit task planning with regular status summarization.
+  - Execution: one primary agent uses the current task tools directly.
+  - Memory: reusable workflow notes and prior solutions.
+  - Default bench: caller-provided
+
+  Coordination pattern:
+  - Start with a clearer plan than the base single-agent loop.
+  - Keep execution centralized in one active agent.
+  - Fall back cleanly when no harness-specific execution layer is available.
+
+  Runtime notes:
+  - Generated bundle: `harness2`
+  - The builder preserves the caller-provided `bench_type`.
+  - Benchmark-specific tools are loaded from `ActionContext` when available.
+  - The builder keeps the current `ActionContext` flow and only normalizes planning/action pairing.
+profile_metrics:
+  num_tasks: 80
+  answer_correct: 0.5125
+  has_valid_answer: 1.0
+  path_score: 0.6744
+  average_actions: 5.35
+  average_tool_calls: 5.4875
+  prompt_tokens_total: 2899146
+  completion_tokens_total: 100883
+  tokens_total: 3000029
+  prompt_tokens_avg: 36239.32
+  completion_tokens_avg: 1261.04
+  tokens_avg: 37500.36
+  runtime_total_min: 81.06
+  runtime_avg_sec: 60.79
+  harness_name: harness2
+  framework_name: agent_kb
+  source_result_file: output/toolhop_round1_harness2/toolhop_flash_searcher_flash_searcher_agent_kb_local_qwen3-aevolve_closed_results.jsonl
+profile_report_markdown: |-
+  # harness2 Analysis
+
+  ## Structure
+  - Planning: explicit task planning with regular status summarization.
+  - Action: one primary agent uses the current task tools directly.
+  - Memory: reusable workflow notes and prior solutions.
+
+  ## Aggregate Metrics
+  - Evaluated tasks: 80
+  - Exact accuracy: 51.2%
+  - Valid answer rate: 100.0%
+  - Average path score: 0.6744
+  - Average actions: 5.35
+  - Average tool calls: 5.49
+  - Prompt / completion / total tokens: 2899146 / 100883 / 3000029
+  - Average prompt / completion / total tokens: 36239.32 / 1261.04 / 37500.36
+  - Total runtime: 81.06 min
+  - Average runtime per task: 60.79 sec
+
+  ## Overall Assessment
+  This is the strongest overall round1 harness in the current set because it combines the best exact accuracy with a relatively controlled cost profile. Its design stays close to the core ToolHop demand: clear planning, centralized execution, and modest memory assistance rather than aggressive branching. It is particularly well matched to multi-hop tool tasks that need stable sequential execution and careful tool selection. It is still weaker on strict string and datetime outputs, where the final normalization step remains less reliable than the retrieval chain itself.
+
+  ## Failure Pattern Analysis
+  - The harness still shows a noticeable path-to-answer drop, which means it often decomposes the task correctly but misses the exact benchmark target at the end.
+  - Compared with weaker harnesses, its failures are less about under-reasoning and more about imperfect finish quality. The agent usually does enough work; it just does not always translate that work into the exact final answer.
+  - Some residual tool-schema errors remain in the failed set, so part of the remaining gap is not deep reasoning weakness but imperfect API discipline under pressure.
+  - The harness is strongest on number-oriented tasks and clearly weaker on formatting-sensitive outputs. That pattern suggests the main bottleneck is not entity tracing, but answer rendering and post-processing.
+
+  ## Module-level Diagnosis
+  ### Planning
+  - What Helps: Explicit planning is one of the harness's strengths. It gives the main agent a clearer execution frame and seems to reduce wasted wandering relative to other direct-execution variants.
+  - What Hurts: Planning still does not fully lock down the final answer shape. The harness can know what to do without enforcing the exact final form that ToolHop expects.
+
+  ### Action
+  - What Helps: Centralized execution through one active agent is highly compatible with ToolHop. It preserves serial dependencies and avoids the coordination noise that hurts more parallel harnesses.
+  - What Hurts: The action loop is still missing a dedicated final verification layer for exact formatting and edge-case transformation. That is likely where much of the remaining accuracy gap lives.
+
+  ### Memory
+  - What Helps: Reusable workflow memory appears to be helping in a pragmatic way. It likely supports familiar call patterns and stable task routing without overwhelming the main loop.
+  - What Hurts: Memory is still a secondary aid rather than a precision mechanism. It improves fluency more than it guarantees correctness on tricky last-step transformations.
+file_order:
+- builder.py
+- Description.md
+- report.md
+- __init__.py
+- planning_module/prompts/toolcalling_agent.yaml
+- planning_module/provider.py
+- action_module/prompts/toolcalling_agent.yaml
+- action_module/provider.py
+- memory_module/provider.py
+source_files:
+  builder.py: |-
+    from __future__ import annotations
+
+    from dataclasses import replace
+    from pathlib import Path
+
+    from Agents.agents import ToolCallingAgent
+    from module_action.base_action import ActionContext
+    from .action_module.provider import ACTION_SYSTEM, get_provider
+    from .memory_module.provider import MEMORY_SYSTEM as DEFAULT_MEMORY_SYSTEM
+    from .planning_module.provider import PLANNING_SYSTEM, PlanningClass
+
+
+    HARNESS_NAME = "harness2"
+    DEFAULT_BENCH_TYPE = None
+    PAIRING_REASON = "fallback_single_react"
+
+
+    def _bind_agent_reference(agent: ToolCallingAgent, tool: object | None) -> None:
+        if tool is not None and hasattr(tool, "agent"):
+            setattr(tool, "agent", agent)
+
+
+    def _ensure_owl_memory(agent: ToolCallingAgent) -> None:
+        if getattr(agent, "planning_system", None) != "owl":
+            return
+        if not hasattr(agent, "web_memory") or agent.web_memory is None:
+            agent.web_memory = []
+        if not hasattr(agent, "reasoning_memory") or agent.reasoning_memory is None:
+            agent.reasoning_memory = []
+
+
+    def prepare_context(context: ActionContext) -> ActionContext:
+        bench_type = context.bench_type or DEFAULT_BENCH_TYPE
+        prompts_type = context.prompts_type or PLANNING_SYSTEM
+        prepared_kwargs = dict(context.kwargs)
+        prepared_kwargs["planning_class"] = PlanningClass
+        return replace(
+            context,
+            planning_system=PLANNING_SYSTEM,
+            action_system=ACTION_SYSTEM,
+            prompts_type=prompts_type,
+            bench_type=bench_type,
+            project_root=Path(__file__).resolve().parent,
+            kwargs=prepared_kwargs,
+        )
+
+
+    def build_agent_from_context(context: ActionContext) -> ToolCallingAgent:
+        prepared_context = prepare_context(context)
+        action_provider = get_provider()
+        agent = action_provider.build(prepared_context)
+
+        setattr(agent, "planning_system", prepared_context.planning_system)
+        setattr(agent, "action_system", prepared_context.action_system)
+        setattr(agent, "harness_name", HARNESS_NAME)
+        setattr(
+            agent,
+            "harness_metadata",
+            {
+                "planning_system": PLANNING_SYSTEM,
+                "action_system": ACTION_SYSTEM,
+                "default_bench_type": DEFAULT_BENCH_TYPE,
+                "recommended_memory_system": DEFAULT_MEMORY_SYSTEM,
+                "pairing_reason": PAIRING_REASON,
+            },
+        )
+
+        if prepared_context.vector_tool is not None:
+            prepared_context.vector_tool.memory = agent.memory
+
+        _bind_agent_reference(agent, prepared_context.process_tool)
+        _bind_agent_reference(agent, prepared_context.end_process_tool)
+        _bind_agent_reference(agent, prepared_context.delete_memory_tool)
+        _bind_agent_reference(agent, prepared_context.executor_tool)
+        _bind_agent_reference(agent, prepared_context.refine_tool)
+
+        _ensure_owl_memory(agent)
+        return agent
+  Description.md: |-
+    Harness summary:
+    - Planning: explicit task planning with regular status summarization.
+    - Execution: one primary agent uses the current task tools directly.
+    - Memory: reusable workflow notes and prior solutions.
+    - Default bench: caller-provided
+
+    Coordination pattern:
+    - Start with a clearer plan than the base single-agent loop.
+    - Keep execution centralized in one active agent.
+    - Fall back cleanly when no harness-specific execution layer is available.
+
+    Runtime notes:
+    - Generated bundle: `harness2`
+    - The builder preserves the caller-provided `bench_type`.
+    - Benchmark-specific tools are loaded from `ActionContext` when available.
+    - The builder keeps the current `ActionContext` flow and only normalizes planning/action pairing.
+  report.md: |-
+    # harness2 Analysis
+
+    ## Structure
+    - Planning: explicit task planning with regular status summarization.
+    - Action: one primary agent uses the current task tools directly.
+    - Memory: reusable workflow notes and prior solutions.
+
+    ## Aggregate Metrics
+    - Evaluated tasks: 80
+    - Exact accuracy: 51.2%
+    - Valid answer rate: 100.0%
+    - Average path score: 0.6744
+    - Average actions: 5.35
+    - Average tool calls: 5.49
+    - Prompt / completion / total tokens: 2899146 / 100883 / 3000029
+    - Average prompt / completion / total tokens: 36239.32 / 1261.04 / 37500.36
+    - Total runtime: 81.06 min
+    - Average runtime per task: 60.79 sec
+
+    ## Overall Assessment
+    This is the strongest overall round1 harness in the current set because it combines the best exact accuracy with a relatively controlled cost profile. Its design stays close to the core ToolHop demand: clear planning, centralized execution, and modest memory assistance rather than aggressive branching. It is particularly well matched to multi-hop tool tasks that need stable sequential execution and careful tool selection. It is still weaker on strict string and datetime outputs, where the final normalization step remains less reliable than the retrieval chain itself.
+
+    ## Failure Pattern Analysis
+    - The harness still shows a noticeable path-to-answer drop, which means it often decomposes the task correctly but misses the exact benchmark target at the end.
+    - Compared with weaker harnesses, its failures are less about under-reasoning and more about imperfect finish quality. The agent usually does enough work; it just does not always translate that work into the exact final answer.
+    - Some residual tool-schema errors remain in the failed set, so part of the remaining gap is not deep reasoning weakness but imperfect API discipline under pressure.
+    - The harness is strongest on number-oriented tasks and clearly weaker on formatting-sensitive outputs. That pattern suggests the main bottleneck is not entity tracing, but answer rendering and post-processing.
+
+    ## Module-level Diagnosis
+    ### Planning
+    - What Helps: Explicit planning is one of the harness's strengths. It gives the main agent a clearer execution frame and seems to reduce wasted wandering relative to other direct-execution variants.
+    - What Hurts: Planning still does not fully lock down the final answer shape. The harness can know what to do without enforcing the exact final form that ToolHop expects.
+
+    ### Action
+    - What Helps: Centralized execution through one active agent is highly compatible with ToolHop. It preserves serial dependencies and avoids the coordination noise that hurts more parallel harnesses.
+    - What Hurts: The action loop is still missing a dedicated final verification layer for exact formatting and edge-case transformation. That is likely where much of the remaining accuracy gap lives.
+
+    ### Memory
+    - What Helps: Reusable workflow memory appears to be helping in a pragmatic way. It likely supports familiar call patterns and stable task routing without overwhelming the main loop.
+    - What Hurts: Memory is still a secondary aid rather than a precision mechanism. It improves fluency more than it guarantees correctness on tricky last-step transformations.
+  __init__.py: |-
+    from .builder import (
+        ACTION_SYSTEM,
+        DEFAULT_BENCH_TYPE,
+        DEFAULT_MEMORY_SYSTEM,
+        PAIRING_REASON,
+        PLANNING_SYSTEM,
+        HARNESS_NAME,
+        build_agent_from_context,
+    )
+
+    __all__ = [
+        "HARNESS_NAME",
+        "PLANNING_SYSTEM",
+        "ACTION_SYSTEM",
+        "DEFAULT_BENCH_TYPE",
+        "DEFAULT_MEMORY_SYSTEM",
+        "PAIRING_REASON",
+        "build_agent_from_context",
+    ]
+  planning_module/prompts/toolcalling_agent.yaml: |-
+    planning:
+      initial_plan: |-
+        You are the concise planner for a single-executor tool agent.
+
+        Produce at most 3 short lines:
+        1. What evidence or state changes are needed.
+        2. The safest first tool/action direction.
+        3. The stop condition and final verifier condition.
+
+        Do not create subtasks, dependency graphs, parallel workers, debate, or long plans.
+        Mention that failed calls require changed arguments, a changed tool, or finalization if enough evidence exists.
+      task_input: |-
+        Task:
+        {{task}}
+    summary:
+      update_pre_messages: |-
+        You are the concise reflection module for a single-executor tool agent.
+
+        Review only the recent trajectory. Focus on:
+        - established observations
+        - repeated or failed calls
+        - the next valid tool/action
+        - whether the agent should call verify_before_final and then final_answer
+      update_post_messages: |-
+        Return at most 5 lines:
+        evidence:
+        failed_or_repeated:
+        next_action:
+        verifier_needed: yes/no
+        ready_to_final: yes/no
+  planning_module/provider.py: |-
+    import textwrap
+    from typing import Any, Callable, Dict, List, Optional
+    from jinja2 import StrictUndefined, Template
+
+    from Agents.memory import ActionStep, AgentMemory, PlanningStep, SummaryStep
+    from Agents.models import ChatMessage, MessageRole
+    from Agents.monitoring import AgentLogger, LogLevel
+    from Agents.tools import Tool
+    from rich.rule import Rule
+    from rich.text import Text
+    from module_planning.base_planning import BasePlanning
+
+    def populate_template(template: str, variables: Dict[str, Any]) -> str:
+        """
+        Fill Jinja2 template with variables.
+
+        Args:
+            template: Jinja2 template string
+            variables: Template variable dictionary
+
+        Returns:
+            str: Filled string
+        """
+        compiled_template = Template(template, undefined=StrictUndefined)
+        try:
+            return compiled_template.render(**variables)
+        except Exception as e:
+            raise Exception(f"Error during jinja template rendering: {type(e).__name__}: {e}")
+
+
+    class PlanningProvider(BasePlanning):
+        """
+        Planning implementation for a deliberate single-agent planner.
+
+        This class provides concrete implementations of planning methods:
+        - topology_initialize: Generates initial task plan (replaces planning_step)
+        - adaptation: Generates periodic progress summaries (replaces summary_step)
+        """
+
+        def __init__(
+            self,
+            model: Callable[[List[Dict[str, str]]], ChatMessage],
+            tools: Dict[str, Tool],
+            prompt_templates: Dict[str, Any],
+            memory: AgentMemory,
+            logger: AgentLogger
+        ):
+            super().__init__(model, tools, prompt_templates, memory, logger)
+
+        def topology_initialize(self, task: str) -> PlanningStep:
+            """
+            Generate initial task plan and record to memory and logger.
+
+            This method replaces the MultiStepAgent.planning_step() method with identical functionality:
+            1. Build planning prompt messages
+            2. Call LLM to generate plan
+            3. Extract plan content and reasoning process
+            4. Record to memory (via self.memory.steps.append)
+            5. Output to logger (via self.logger.log)
+
+            Args:
+                task: Task description to execute
+
+            Returns:
+                PlanningStep: Step object containing plan information with fields:
+                    - model_input_messages: Message list sent to model
+                    - plan: Generated plan text
+                    - plan_think: Plan thinking content (currently empty string)
+                    - plan_reasoning: Model reasoning content
+            """
+            # Build system prompt messages
+            input_messages = [
+                {
+                    "role": MessageRole.SYSTEM,
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": populate_template(
+                                self.prompt_templates["planning"]["initial_plan"],
+                                variables={
+                                    "tools": self.tools,
+                                },
+                            ),
+                        }
+                    ],
+                },
+            ]
+            memory_guidance = self.append_memory_guidance(input_messages)
+
+            # Build task input messages
+            task_messages = [{
+                "role": MessageRole.USER,
+                "content": [{"type": "text", "text": populate_template(self.prompt_templates["planning"]["task_input"], variables={"task": task})}],
+            }]
+
+            # Call model to generate plan
+            chat_message_plan: ChatMessage = self.model(input_messages + task_messages)
+            think_content = chat_message_plan.reasoning_content
+            plans = chat_message_plan.content
+            plans_think, plans_answer = "", plans
+
+            # Format plan text for log output
+            final_plan_redaction = textwrap.dedent(
+                f"""Here is the plan of action that I will follow to solve the task:\n```\n{plans_answer}\n```\n"""
+            )
+
+            # Output to logger
+            self.logger.log(
+                Rule("[bold]Initial plan", style="orange"),
+                Text(final_plan_redaction),
+                level=LogLevel.INFO,
+            )
+
+            # Create PlanningStep object
+            planning_step = PlanningStep(
+                model_input_messages=input_messages,
+                plan=plans_answer,
+                plan_think=plans_think,
+                plan_reasoning=think_content,
+                memory_guidance=memory_guidance,
+            )
+
+            # Record to memory
+            self.memory.steps.append(planning_step)
+
+            return planning_step
+
+
+        def adaptation(
+            self,
+            task: str,
+            step: int,
+            write_memory_to_messages: Callable[[Optional[List[ActionStep]], Optional[bool]], List[Dict[str, str]]]
+        ) -> SummaryStep:
+            """
+            Generate execution progress summary and record to memory and logger.
+
+            This method replaces the MultiStepAgent.summary_step() method with identical functionality:
+            1. Read execution history from memory
+            2. Build summary prompt messages
+            3. Call LLM to generate summary
+            4. Extract summary content and reasoning process
+            5. Record to memory (via self.memory.steps.append)
+            6. Output to logger (via self.logger.log)
+
+            Args:
+                task: Task description to execute
+                step: Current step number for context prompting
+                write_memory_to_messages: Function to convert memory steps to message list
+
+            Returns:
+                SummaryStep: Step object containing summary information with fields:
+                    - model_input_messages: Message list sent to model
+                    - summary: Generated summary text
+                    - summary_reasoning: Model reasoning content
+            """
+            # Read execution history from memory (skip system prompt)
+            memory_messages = write_memory_to_messages(None, False)[1:]
+
+            # Build summary prompt pre and post messages
+            update_pre_messages = {
+                "role": MessageRole.SYSTEM,
+                "content": [{"type": "text", "text": self.prompt_templates["summary"]["update_pre_messages"]}],
+            }
+            update_post_messages = {
+                "role": MessageRole.USER,
+                "content": [{"type": "text", "text": self.prompt_templates["summary"]["update_post_messages"]}],
+            }
+
+            # Combine complete input messages
+            input_messages = [update_pre_messages] + memory_messages + [update_post_messages]
+
+            # Call model to generate summary
+            chat_message_summary: ChatMessage = self.model(input_messages)
+
+            summary_answer = chat_message_summary.content
+            summary_cot_content = chat_message_summary.reasoning_content
+
+            # Format summary text for log output
+            final_summary_redaction = textwrap.dedent(
+                f"""
+                Here is my summary of action to solve the task:
+                ```
+                {summary_answer}
+                ```"""
+            )
+
+            # Create SummaryStep object
+            summary_step = SummaryStep(
+                model_input_messages=input_messages,
+                summary=summary_answer,
+                summary_reasoning=summary_cot_content,
+            )
+
+            # Record to memory
+            self.memory.steps.append(summary_step)
+
+            # Output to logger
+            self.logger.log(
+                Rule("[bold]Summary", style="orange"),
+                Text(final_summary_redaction),
+                level=LogLevel.INFO,
+            )
+
+            return summary_step
+
+    PLANNING_SYSTEM = 'concise_reflection'
+    PLANNING_MODULE = 'concise_reflection'
+    PlanningClass = PlanningProvider
+
+    __all__ = ['PLANNING_SYSTEM', 'PLANNING_MODULE', 'PlanningProvider', 'PlanningClass']
+  action_module/prompts/toolcalling_agent.yaml: |-
+    system_prompt: |-
+      You are a concise reflection tool-using assistant.
+
+      Operate as one executor, not a team. Keep the plan short, use the provided tools directly, reflect every few steps, and verify before the final answer.
+
+      Core rules:
+      - Use only tool names and argument keys from the current schema.
+      - Prefer one tool call per step.
+      - Do not invent tools, records, files, IDs, APIs, or observations.
+      - If a tool fails, the next attempt must change the tool, change the arguments, or stop if enough evidence exists.
+      - When the answer or state completion seems ready, call verify_before_final once, then call final_answer or the task terminal tool.
+      - For state-changing tasks, preserve transaction order and avoid speculative updates.
+
+      Return strict JSON only:
+      {
+        "think": "brief next-step reasoning",
+        "tools": [
+          {"name": "actual_tool_name", "arguments": {"arg": "value"}}
+        ]
+      }
+
+    final_answer:
+      pre_messages: |-
+        Produce the final answer only after checking the trajectory and verifier feedback.
+
+      post_messages: |-
+        Return strict JSON only:
+
+        {
+          "think": "brief reason why the answer is supported",
+          "answer": "the final answer"
+        }
+
+        Rules:
+        - The answer field must contain only the requested answer or completion result.
+        - Base the answer on observations only.
+        - For short-answer or retrieval-style QA tasks, return the raw short answer.
+        - For stateful tasks, only claim completion when required state changes or the terminal completion tool support it.
+
+        Task:
+        {{task}}
+
+    step:
+      pre_messages: |-
+        Continue the concise single-executor loop.
+
+        Available tool schemas:
+        {{tool_functions_json}}
+
+        Original task:
+        {{task}}
+
+        Decision checklist:
+        - What is the one missing fact or state transition?
+        - Does the next tool name exist exactly in the schema?
+        - Are the argument keys copied from the schema?
+        - Did the same call already fail? If yes, change strategy.
+        - Is the answer already supported? If yes, call verify_before_final, then final_answer.
+
+        Return strict JSON only:
+        {
+          "think": "brief reasoning",
+          "tools": [
+            {"name": "actual_tool_name", "arguments": {"arg": "value"}}
+          ]
+        }
+  action_module/provider.py: |-
+    from __future__ import annotations
+
+    from typing import Any
+
+    from _harness_guards import ReflectionCriticTool
+    from module_action.base_action import ActionContext, BaseActionProvider
+
+
+    class ActionProvider(BaseActionProvider):
+        PROMPTS_TYPE = "concise_reflection"
+        DEFAULT_SUMMARY_INTERVAL = 4
+
+        def build_affordance(
+            self,
+            bench_type: str | None,
+            context: ActionContext,
+        ) -> list[Any]:
+            return self.get_primary_task_tools(context, include_reasoning=True)
+
+        def build_specification(
+            self,
+            context: ActionContext,
+            tools: list[Any],
+        ) -> None:
+            self.prompts_type = self.PROMPTS_TYPE
+            self.prompt_templates = self.load_prompt_templates(context, self.prompts_type)
+            self.organization_planning_system = context.planning_system
+
+        def build_organization(
+            self,
+            context: ActionContext,
+            tools: list[Any],
+        ):
+            verifier = ReflectionCriticTool(
+                context=context,
+                name="verify_before_final",
+                description=(
+                    "Non-environment verifier. Call before final_answer when the answer "
+                    "or completion claim is ready; it checks support, schema discipline, "
+                    "and repeated failures without touching the task environment."
+                ),
+            )
+            root_tools = self.normalize_tools([*tools, verifier])
+            agent = self.create_agent(
+                context,
+                tools=root_tools,
+                prompt_templates=self.prompt_templates,
+                prompts_type=self.prompts_type,
+                planning_system=self.organization_planning_system,
+            )
+            verifier.bind_agent(agent, root_tools)
+            if agent.summary_interval is None:
+                agent.summary_interval = self.DEFAULT_SUMMARY_INTERVAL
+            setattr(
+                agent,
+                "harness_policy",
+                {
+                    "mode": "concise_reflection",
+                    "plan_lines_max": 3,
+                    "reflection_interval": agent.summary_interval,
+                    "final_verifier": verifier.name,
+                },
+            )
+            return agent
+
+
+    ACTION_SYSTEM = "concise_reflection"
+    ACTION_MODULE = "concise_reflection"
+
+    ConciseReflectionActionProvider = ActionProvider
+
+
+    def get_provider():
+        return ActionProvider()
+
+
+    __all__ = [
+        "ACTION_SYSTEM",
+        "ACTION_MODULE",
+        "ActionProvider",
+        "get_provider",
+        "ConciseReflectionActionProvider",
+    ]
+  memory_module/provider.py: |-
+    import json
+    import os
+    import uuid
+    from typing import List, Optional, Dict, Any
+    from collections import defaultdict
+    from dataclasses import dataclass, field
+    from datetime import datetime
+    import numpy as np
+    from sklearn.feature_extraction.text import TfidfVectorizer
+    from sklearn.metrics.pairwise import cosine_similarity
+    try:
+        from sentence_transformers import SentenceTransformer
+    except Exception:
+        SentenceTransformer = None
+    from module_memory.providers.model_loader import load_sentence_transformer
+
+    from module_memory.base_memory import BaseMemoryProvider, atomic_write_json, file_lock
+    from module_memory.memory_types import (
+        MemoryRequest,
+        MemoryResponse,
+        TrajectoryData,
+        MemoryType,
+        MemoryItem,
+        MemoryStatus
+    )
+
+    def load_embedding_model(model_name: str = 'sentence-transformers/all-MiniLM-L6-v2',
+                             cache_dir: str = './storage/models') -> Optional[SentenceTransformer]:
+        return load_sentence_transformer(
+            model_name=model_name,
+            cache_dir=cache_dir,
+            allow_unavailable=SentenceTransformer is None,
+        )
+
+
+    @dataclass
+    class WorkflowInstance:
+        workflow_id: str = field(default_factory=lambda: str(datetime.now().timestamp()))
+        query: str = ""
+        agent_planning: Optional[str] = None
+        search_agent_planning: Optional[str] = None
+        agent_experience: Optional[str] = None
+        search_agent_experience: Optional[str] = None
+        query_embedding: Optional[np.ndarray] = None
+        plan_embedding: Optional[np.ndarray] = None
+        search_plan_embedding: Optional[np.ndarray] = None
+
+
+    class AgenticKnowledgeBase:
+
+        def __init__(self, json_file_paths=None, model_cache_dir: str = './storage/models'):
+            self.workflows: Dict[str, WorkflowInstance] = {}
+            self.embedding_model = load_embedding_model(
+                model_name='sentence-transformers/all-MiniLM-L6-v2',
+                cache_dir=model_cache_dir
+            )
+
+            self.field_components = {
+                'query': {
+                    'vectorizer': TfidfVectorizer(stop_words='english'),
+                    'matrix': None,
+                    'workflow_ids': []
+                },
+            }
+
+            if json_file_paths:
+                self.load_initial_data(json_file_paths)
+                self.finalize_index()
+
+        def load_initial_data(self, json_file_paths):
+            for json_path in json_file_paths:
+                if not os.path.exists(json_path):
+                    raise FileNotFoundError(f'JSON file not found: {json_path}')
+                self.parse_json_file(json_path)
+
+        def _load_json_with_fallback(self, json_file_path: str):
+            for encoding in ("utf-8-sig", "utf-8", "gbk"):
+                try:
+                    with open(json_file_path, "r", encoding=encoding) as f:
+                        return json.load(f)
+                except UnicodeDecodeError:
+                    continue
+            with open(json_file_path, "r", encoding="utf-8", errors="replace") as f:
+                return json.load(f)
+
+        def parse_json_file(self, json_file_path):
+            try:
+                data = self._load_json_with_fallback(json_file_path)
+                batch = []
+                for item in data:
+                    try:
+                        instance = WorkflowInstance(
+                            query = item.get('question', ''),
+                            agent_planning = item.get('agent_planning'),
+                            search_agent_planning = item.get('search_agent_planning'),
+                            agent_experience = item.get('agent_experience'),
+                            search_agent_experience = item.get('search_agent_experience')
+                        )
+                        batch.append(instance)
+                    except KeyError as e:
+                        continue
+                for instance in batch:
+                    self.workflows[instance.workflow_id] = instance
+            except Exception as e:
+                print(f"Error parsing file: {json_file_path} | {e}")
+
+        def add_workflow_instance(self, workflow: WorkflowInstance):
+            self.workflows[workflow.workflow_id] = workflow
+            return workflow
+
+        def finalize_index(self):
+            self.build_tfidf_indices()
+            self.build_embeddings()
+
+        def build_tfidf_indices(self):
+            field_data = {
+                'query': [],
+            }
+
+            for workflow in self.workflows.values():
+                field_data['query'].append(workflow.query)
+
+            for field in ['query']:
+                if len(field_data[field]) == 0:
+                    continue
+
+                vectorizer = self.field_components[field]['vectorizer']
+                self.field_components[field]['matrix'] = vectorizer.fit_transform(field_data[field])
+                self.field_components[field]['workflow_ids'] = list(self.workflows.keys())
+
+        def build_embeddings(self):
+            if self.embedding_model is None:
+                for workflow in self.workflows.values():
+                    workflow.query_embedding = None
+                return
+
+            workflows = list(self.workflows.values())
+            batch_size = 32
+
+            queries = [w.query for w in workflows]
+            query_embeddings = self.embedding_model.encode(
+                queries,
+                batch_size=batch_size,
+                show_progress_bar=False,
+                convert_to_numpy=True
+            )
+
+            for i, workflow in enumerate(workflows):
+                workflow.query_embedding = query_embeddings[i]
+
+        def field_text_search(self, query: str, field: str, top_k: int = 3) -> List[dict]:
+            component = self.field_components[field]
+            if component['matrix'] is None or not component['workflow_ids']:
+                return []
+
+            query_vec = component['vectorizer'].transform([query])
+            similarities = cosine_similarity(query_vec, component['matrix']).flatten()
+            top_indices = similarities.argsort()[-top_k:][::-1]
+
+            return [{
+                'workflow_id': component['workflow_ids'][idx],
+                'score': float(similarities[idx]),
+                'field': field,
+                'content': getattr(self.workflows[component['workflow_ids'][idx]],
+                                 field if field != 'search_plan' else 'search_agent_planning')
+            } for idx in top_indices]
+
+        def field_semantic_search(self, query: str, field: str, top_k: int = 3) -> List[dict]:
+            if self.embedding_model is None:
+                return []
+
+            query_embedding = self.embedding_model.encode(query, convert_to_numpy=True)
+
+            embedding_field_map = {
+                'query': 'query_embedding',
+            }
+
+            content_field_map = {
+                'query': 'query',
+            }
+
+            embeddings = []
+            workflows = []
+            for wf_id, workflow in self.workflows.items():
+                emb = getattr(workflow, embedding_field_map[field], None)
+                if emb is not None:
+                    embeddings.append(emb)
+                    workflows.append(workflow)
+
+            if not embeddings:
+                return []
+
+            similarities = cosine_similarity([query_embedding], embeddings)[0]
+            top_indices = similarities.argsort()[-top_k:][::-1]
+
+            return [{
+                'workflow_id': workflows[idx].workflow_id,
+                'score': float(similarities[idx]),
+                'field': field,
+                'content': getattr(workflows[idx], content_field_map[field], "")
+            } for idx in top_indices]
+
+
+    class AKB_Manager:
+
+        def __init__(self, json_file_paths=None, model_cache_dir: str = './storage/models'):
+            self.knowledge_base = AgenticKnowledgeBase(
+                json_file_paths=json_file_paths,
+                model_cache_dir=model_cache_dir
+            )
+
+        def hybrid_search(self, query: str, top_k: int = 5,
+                          weights: Dict[str, float] = None) -> List[dict]:
+            weights = weights or {'text': 0.5, 'semantic': 0.5}
+            field_weights = {'query': 1.0}
+
+            score_board = defaultdict(float)
+
+            for field in ['query']:
+                for result in self.knowledge_base.field_text_search(query, field, top_k*2):
+                    score_board[result['workflow_id']] += weights['text'] * field_weights[field] * result['score']
+                for result in self.knowledge_base.field_semantic_search(query, field, top_k*2):
+                    score_board[result['workflow_id']] += weights['semantic'] * field_weights[field] * result['score']
+
+            sorted_results = sorted(score_board.items(), key=lambda x: x[1], reverse=True)[:top_k]
+
+            detailed_results = []
+            for wf_id, total_score in sorted_results:
+                workflow = self.knowledge_base.workflows[wf_id]
+                detailed_results.append({
+                    'workflow_id': wf_id,
+                    'total_score': total_score,
+                    'query': workflow.query,
+                    'plan': workflow.agent_planning,
+                    'search_plan': workflow.search_agent_planning,
+                    'agent_experience': workflow.agent_experience,
+                    'search_agent_experience': workflow.search_agent_experience
+                })
+
+            return detailed_results
+
+        def search_by_text(self, query: str, field: str = "query", top_k: int = 3) -> List[dict]:
+            results = []
+            for result in self.knowledge_base.field_text_search(query, field, top_k):
+                workflow = self.get_workflow_details(result['workflow_id'])
+                results.append({
+                    'workflow_id': result['workflow_id'],
+                    'score': result['score'],
+                    'content': {
+                        'query': workflow.query,
+                        'plan': workflow.agent_planning,
+                        'search_plan': workflow.search_agent_planning,
+                        'agent_experience': workflow.agent_experience,
+                        'search_agent_experience': workflow.search_agent_experience
+                    }
+                })
+            return sorted(results, key=lambda x: x['score'], reverse=True)[:top_k]
+
+        def search_by_semantic(self, query: str, field: str = "query", top_k: int = 3) -> List[dict]:
+            results = []
+            for result in self.knowledge_base.field_semantic_search(query, field, top_k):
+                workflow = self.get_workflow_details(result['workflow_id'])
+                results.append({
+                    'workflow_id': result['workflow_id'],
+                    'score': result['score'],
+                    'content': {
+                        'query': workflow.query,
+                        'plan': workflow.agent_planning,
+                        'search_plan': workflow.search_agent_planning,
+                        'agent_experience': workflow.agent_experience,
+                        'search_agent_experience': workflow.search_agent_experience
+                    }
+                })
+            return sorted(results, key=lambda x: x['score'], reverse=True)[:top_k]
+
+        def get_workflow_details(self, workflow_id: str) -> Optional[WorkflowInstance]:
+            return self.knowledge_base.workflows.get(workflow_id)
+
+
+    class MemoryProvider(BaseMemoryProvider):
+
+        DEFAULT_PROMPTS = {
+            'student_agent_reason': """Extract key information from user query to construct efficient search terms for retrieving the most relevant results.
+
+    Requirements:
+    1. Analyze the user's question to identify core concepts, terminology, and keywords
+    2. Extract contextual information and constraints that may impact search quality
+    3. Break down complex questions into searchable components
+    4. Identify the domain, subject matter, and specific needs of the question
+
+    Output format:
+    <core concepts or topics of the question>
+
+    Ensure search terms are specific enough to retrieve relevant information while maintaining sufficient breadth to capture related cases.
+    Combine technical terminology with everyday expressions to optimize search effectiveness.
+
+    Here is the user query:
+    {{user_query}}"""
+        }
+
+        def __init__(self, config: Optional[dict] = None):
+            super().__init__(MemoryType.AGENT_KB, config)
+
+            self.kb_database_path = self.config.get(
+                "kb_database_path",
+                "./storage/agent_kb/agent_kb_database.json"
+            )
+            self.top_k = self.config.get("top_k", 3)
+            self.search_weights = self.config.get(
+                "search_weights",
+                {'text': 0.5, 'semantic': 0.5}
+            )
+
+            self.model_cache_dir = self.config.get(
+                "model_cache_dir",
+                "./storage/models"
+            )
+
+            self.model = self.config.get("model", None)
+            self.akb_manager: Optional[AKB_Manager] = None
+
+        def initialize(self) -> bool:
+            try:
+                os.makedirs(os.path.dirname(self.kb_database_path), exist_ok=True)
+
+                if not os.path.exists(self.kb_database_path):
+                    atomic_write_json(self.kb_database_path, [], indent=2)
+
+                self.akb_manager = AKB_Manager(
+                    json_file_paths=[self.kb_database_path],
+                    model_cache_dir=self.model_cache_dir
+                )
+                return True
+
+            except Exception as e:
+                print(f"Error initializing Agent KB provider: {e}")
+                return False
+
+        def _reason_for_retrieval(self, request: MemoryRequest) -> str:
+            if not self.model:
+                return request.query
+
+            reason_prompt = self.DEFAULT_PROMPTS['student_agent_reason']
+            prompt = reason_prompt.replace('{{user_query}}', request.query)
+
+            try:
+                messages = [
+                    {
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "text",
+                                "text": prompt
+                            }
+                        ]
+                    }
+                ]
+
+                response = self.model(messages)
+                refined_query = getattr(response, "content", str(response)).strip()
+
+                return refined_query if refined_query else request.query
+
+            except Exception as e:
+                print(f"Error in reasoning step: {e}")
+                return request.query
+
+        def provide_memory(self, request: MemoryRequest) -> MemoryResponse:
+            if not self.akb_manager:
+                return MemoryResponse(
+                    memories=[],
+                    memory_type=self.memory_type,
+                    total_count=0,
+                    request_id=str(uuid.uuid4())
+                )
+
+            if request.status != MemoryStatus.BEGIN:
+                return MemoryResponse(
+                    memories=[],
+                    memory_type=self.memory_type,
+                    total_count=0,
+                    request_id=str(uuid.uuid4())
+                )
+
+            try:
+                refined_query = self._reason_for_retrieval(request)
+
+                search_results = self.akb_manager.hybrid_search(
+                    query=refined_query,
+                    top_k=self.top_k,
+                    weights=self.search_weights
+                )
+
+                if not search_results:
+                    return MemoryResponse(
+                        memories=[],
+                        memory_type=self.memory_type,
+                        total_count=0,
+                        request_id=str(uuid.uuid4())
+                    )
+
+                synthesized_content = self._synthesize_all_memories(search_results, request)
+
+                memory_item = MemoryItem(
+                    id=f"synthesized_{uuid.uuid4()}",
+                    content=synthesized_content,
+                    metadata={
+                        'num_sources': len(search_results),
+                        'source_queries': [r['query'] for r in search_results],
+                        'avg_score': sum(r['total_score'] for r in search_results) / len(search_results),
+                        'status': request.status.value,
+                        'original_query': request.query,
+                        'refined_query': refined_query
+                    },
+                    score=sum(r['total_score'] for r in search_results) / len(search_results)
+                )
+
+                return MemoryResponse(
+                    memories=[memory_item],
+                    memory_type=self.memory_type,
+                    total_count=1,
+                    request_id=str(uuid.uuid4())
+                )
+
+            except Exception as e:
+                print(f"Error providing memory: {e}")
+                return MemoryResponse(
+                    memories=[],
+                    memory_type=self.memory_type,
+                    total_count=0,
+                    request_id=str(uuid.uuid4())
+                )
+
+        def _synthesize_all_memories(self, results: List[Dict[str, Any]], request: MemoryRequest) -> str:
+            try:
+                if request.status == MemoryStatus.BEGIN:
+                    student_guidance = self._synthesize_student_guidance(results, request)
+                    teacher_guidance = self._synthesize_teacher_guidance(results, request)
+
+                    return (
+                        "AGENT-KB Student Guidance:\n"
+                        f"{student_guidance}\n\n"
+                        "AGENT-KB Teacher Guidance:\n"
+                        f"{teacher_guidance}"
+                    )
+
+                queries = [r['query'] for r in results if r.get('query')]
+                return f"AGENT-KB Guidance: {'; '.join(queries)}"
+
+            except Exception as e:
+                print(f"Error synthesizing memories: {e}")
+                queries = [r.get('query', '') for r in results if r.get('query')]
+                joined = '; '.join(queries) if queries else results[0].get('query', '')
+                return f"AGENT-KB Guidance: {joined}"
+
+        def _synthesize_student_guidance(self, results: List[Dict[str, Any]], request: MemoryRequest) -> str:
+            try:
+                if not self.model:
+                    all_plans = []
+                    for r in results:
+                        if r.get('plan'):
+                            all_plans.append(r['plan'])
+                        if r.get('search_plan'):
+                            all_plans.append(r['search_plan'])
+                    return ' '.join(all_plans) if all_plans else results[0].get('query', '')
+
+                all_planning_content = []
+                for i, result in enumerate(results, 1):
+                    source_parts = []
+
+                    if result.get('query'):
+                        source_parts.append(f"Similar task:\n{result['query']}")
+
+                    suggestions = []
+                    if result.get('plan'):
+                        suggestions.append(result['plan'])
+                    if result.get('search_plan'):
+                        suggestions.append(result['search_plan'])
+
+                    if suggestions:
+                        source_parts.append(f"Suggestions:\n{' '.join(suggestions)}")
+
+                    if source_parts:
+                        all_planning_content.append('\n'.join(source_parts))
+
+                if not all_planning_content:
+                    return results[0].get('query', '')
+
+                matched_content = "\n\n".join(all_planning_content)
+
+                prompt = f"""Analyze similar tasks and past experiences to generate concise, actionable suggestions for improving the current plan. Based on the patterns identified in relevant tasks and insights from the knowledge base, provide specific recommendations.
+
+    **Key Requirements:**
+    1. Focus exclusively on technical/behavioral improvements derived from similar task patterns and experience.
+    2. Provide root-cause solutions and implementation strategies based on past successes.
+    3. Provide 2-3 specific suggestions only.
+    4. Format output strictly as:
+       1. [Specific suggestion 1]
+       2. [Specific suggestion 2]
+       ...
+    5. Use gentle, suggestive language rather than directive commands.
+    No headings, explanations, or markdown.
+
+    **Current Task:** {request.query}
+
+    **You can refer to similar tasks, plans, and corresponding experience to provide your suggestions:**
+    {matched_content}"""
+
+                messages = [
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "text", "text": prompt}
+                        ]
+                    }
+                ]
+
+                response = self.model(messages)
+                guidance = getattr(response, "content", str(response)).strip()
+
+                return guidance if guidance else '; '.join([r.get('query', '') for r in results])
+
+            except Exception as e:
+                print(f"Error synthesizing student guidance: {e}")
+                return results[0].get('query', '')
+
+        def _synthesize_teacher_guidance(self, results: List[Dict[str, Any]], request: MemoryRequest) -> str:
+            try:
+                if not self.model:
+                    all_experiences = []
+                    for r in results:
+                        if r.get('agent_experience'):
+                            all_experiences.append(r['agent_experience'])
+                        if r.get('search_agent_experience'):
+                            all_experiences.append(r['search_agent_experience'])
+                    return ' '.join(all_experiences) if all_experiences else results[0].get('query', '')
+
+                all_experience_content = []
+                for i, result in enumerate(results, 1):
+                    source_content = []
+                    if result.get('query'):
+                        source_content.append(f"Query: {result['query']}")
+                    if result.get('agent_experience'):
+                        source_content.append(f"Agent Experience: {result['agent_experience']}")
+                    if result.get('search_agent_experience'):
+                        source_content.append(f"Search Experience: {result['search_agent_experience']}")
+
+                    if source_content:
+                        all_experience_content.append(
+                            f"Source {i} (Score: {result.get('total_score', 0):.3f}):\n" +
+                            "\n".join(source_content)
+                        )
+
+                if not all_experience_content:
+                    return results[0].get('query', '')
+
+                agent_context = ""
+                if request and request.context:
+                    max_context_length = 1000
+                    truncated_context = request.context
+                    if len(request.context) > max_context_length:
+                        truncated_context = "... [truncated]\n" + request.context[-max_context_length:]
+                    agent_context = f"\n\nCurrent Agent Context:\n{truncated_context}"
+
+                matched_content = "\n\n".join(all_experience_content)
+
+                prompt = f"""You are an experienced AI agent teacher synthesizing multiple experience entries to provide unified operational guidance.
+
+    Current Task: {request.query}
+
+    Retrieved Experience Entries ({len(results)} sources):
+    {matched_content}{agent_context}
+
+    Based on ALL the matched experience above, synthesize cohesive, unified operational guidance for the agent. Your guidance should:
+
+    1. Integrate techniques and methods from all sources
+    2. Combine common pitfalls and best practices across sources
+    3. Provide specific, actionable execution tips
+
+    Requirements:
+    - Be specific and comprehensive (2-3 sentences)
+    - Focus on detailed operations and practical techniques
+    - Present a unified perspective synthesizing all sources
+    - Provide concrete, actionable suggestions
+    - Help refine and improve the current approach based on collective experience
+    - Use gentle, suggestive language rather than directive commands.
+    Provide only the synthesized guidance text with no additional explanations or source references."""
+
+                messages = [
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "text", "text": prompt}
+                        ]
+                    }
+                ]
+
+                response = self.model(messages)
+                guidance = getattr(response, "content", str(response)).strip()
+
+                return guidance if guidance else '; '.join([r.get('query', '') for r in results])
+
+            except Exception as e:
+                print(f"Error synthesizing teacher guidance: {e}")
+                return results[0].get('query', '')
+
+
+
+        def take_in_memory(self, trajectory_data: TrajectoryData) -> tuple[bool, str]:
+            """
+            Ingest new memory by intelligently summarizing trajectory with model
+            Only processes successful task executions
+            """
+            try:
+                if not self.model:
+                    error_msg = "Error: No model provided for memory summarization"
+                    print(error_msg)
+                    return False, error_msg
+
+                # Check if task was successful before processing
+                if not self._is_task_successful(trajectory_data):
+                    msg = "Skipping memory ingestion: Task was not successful"
+                    print(msg)
+                    return False, msg
+
+                # Use model to intelligently summarize the trajectory
+                memory_summary = self._summarize_trajectory_with_model(trajectory_data)
+
+                if not memory_summary:
+                    error_msg = "Error: Model summarization failed"
+                    print(error_msg)
+                    return False, error_msg
+
+                # Create new workflow instance data with model-generated summaries
+                new_workflow = {
+                    "question": trajectory_data.query,
+                    "agent_planning": memory_summary.get("agent_planning", ""),
+                    "search_agent_planning": memory_summary.get("search_agent_planning", ""),
+                    "agent_experience": memory_summary.get("agent_experience", ""),
+                    "search_agent_experience": memory_summary.get("search_agent_experience", ""),
+                    "timestamp": datetime.now().isoformat(),
+                    "metadata": trajectory_data.metadata or {}
+                }
+
+                # Append to database file (ensure dir)
+                os.makedirs(os.path.dirname(self.kb_database_path), exist_ok=True)
+                with file_lock(self.kb_database_path):
+                    if os.path.exists(self.kb_database_path):
+                        try:
+                            with open(self.kb_database_path, 'r', encoding='utf-8') as f:
+                                data = json.load(f)
+                        except Exception:
+                            data = []
+                    else:
+                        data = []
+
+                    if not isinstance(data, list):
+                        data = []
+
+                    data.append(new_workflow)
+                    atomic_write_json(self.kb_database_path, data, indent=2)
+
+                # Reinitialize the manager to include new data
+                self.akb_manager = AKB_Manager(json_file_paths=[self.kb_database_path])
+
+                absorbed_memory = f"Summarized trajectory: {memory_summary}"
+                return True, absorbed_memory
+
+            except Exception as e:
+                error_msg = f"Error taking in memory: {e}"
+                print(error_msg)
+                return False, error_msg
+
+        def _is_task_successful(self, trajectory_data: TrajectoryData) -> bool:
+            try:
+                metadata = trajectory_data.metadata or {}
+
+                if 'is_correct' in metadata:
+                    return metadata['is_correct'] is True
+
+                if 'success' in metadata:
+                    return metadata['success'] is True
+                if 'task_success' in metadata:
+                    return metadata['task_success'] is True
+
+                return False
+
+            except Exception as e:
+                print(f"Error determining task success: {e}")
+                return False
+
+        def _format_trajectory_for_model(self, trajectory_data: TrajectoryData) -> str:
+            if not trajectory_data.trajectory:
+                return "No execution trajectory available"
+
+            trajectory_parts = []
+            trajectory_parts.append(f"Task: {trajectory_data.query}")
+            trajectory_parts.append("")
+
+            for i, step in enumerate(trajectory_data.trajectory, 1):
+                step_type = step.get('type', 'step')
+                content = step.get('content', '')
+                trajectory_parts.append(f"Step {i} ({step_type}): {content}")
+
+            if trajectory_data.result:
+                trajectory_parts.append("")
+                trajectory_parts.append(f"Final Result: {trajectory_data.result}")
+
+            return "\n".join(trajectory_parts)
+
+        def _summarize_trajectory_with_model(self, trajectory_data: TrajectoryData) -> Optional[Dict[str, str]]:
+            """
+            Use model to intelligently summarize the trajectory into structured memory components
+            """
+            try:
+                # Prepare trajectory content for model
+                trajectory_text = self._format_trajectory_for_model(trajectory_data)
+
+                # Create enhanced summarization prompt based on high-quality examples
+                prompt = f"""You are an expert AI agent trainer analyzing a successful task execution to extract high-quality memory patterns for future similar tasks.
+
+    TASK ANALYSIS:
+    Question: {trajectory_data.query}
+
+    Execution Trajectory:
+    {trajectory_text}
+
+    Final Result: {trajectory_data.result if trajectory_data.result else "Task completed successfully"}
+
+    MEMORY EXTRACTION INSTRUCTIONS:
+    Extract structured memory components that capture the strategic thinking and methodological approaches used in this successful execution. Focus on actionable insights, specific techniques, and reusable patterns.
+
+    Please provide detailed analysis in the following JSON format:
+
+    {{
+        "agent_planning": "Detailed strategic planning approach with numbered steps, decision-making criteria, tool selection rationale, and problem decomposition strategy",
+        "search_agent_planning": "Comprehensive search strategy including query formulation techniques, source prioritization methods, information extraction approaches, and result validation processes",
+        "agent_experience": "Key lessons learned, successful methodologies, best practices discovered, error avoidance strategies, and general principles that can guide future similar tasks",
+        "search_agent_experience": "Search-specific insights including effective query patterns, reliable source types, information validation techniques, and data processing approaches"
+    }}
+
+    QUALITY REQUIREMENTS:
+    1. Each field must contain substantial, specific content (minimum 2-3 detailed sentences)
+    2. Focus on ACTIONABLE strategies and CONCRETE methodologies, not generic descriptions
+    3. Include specific decision points, tool choices, and reasoning patterns
+    4. Emphasize successful techniques that led to task completion
+    5. Extract transferable knowledge that applies to similar problem types
+    6. Use professional, instructional language as if training another agent
+    7. Include specific examples or patterns where applicable
+
+    EXAMPLES OF HIGH-QUALITY CONTENT:
+    - Agent Planning: "1. Decompose the inquiry: Identify entities using biographical clues... 2. Data/Tool Use Decisions: Use search to resolve identity and find detailed biography... 3. Delegation Strategy: Author identification requires multi-clue queries..."
+    - Search Experience: "Construct layered queries that combine multiple discriminators (facts, dates, roles) to improve specificity... Select sources with documented editorial oversight..."
+
+    Return ONLY the JSON object with no additional text or explanations."""
+
+                # Call model for summarization using proper message format
+                messages = [
+                    {
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "text",
+                                "text": prompt
+                            }
+                        ]
+                    }
+                ]
+
+                try:
+                    response = self.model(messages)
+                    response_text = response.content if hasattr(response, 'content') else str(response)
+                except Exception as e:
+                    print(f"Error calling model: {e}")
+                    return None
+
+                # Extract JSON from response
+                try:
+                    # Try to find JSON in response
+                    import re
+
+                    # First try to parse the entire response as JSON
+                    try:
+                        memory_summary = json.loads(response_text.strip())
+                    except json.JSONDecodeError:
+                        # If that fails, try to extract JSON block
+                        json_match = re.search(r'\{.*?\}', response_text, re.DOTALL)
+                        if json_match:
+                            json_str = json_match.group(0)
+                            memory_summary = json.loads(json_str)
+                        else:
+                            print(f"Warning: No JSON found in model response: {response_text[:500]}...")
+                            return None
+
+                    # Validate required fields and content quality
+                    required_fields = ["agent_planning", "search_agent_planning", "agent_experience", "search_agent_experience"]
+                    if all(field in memory_summary and memory_summary[field].strip() for field in required_fields):
+                        # Additional quality check - ensure substantial content
+                        if all(len(memory_summary[field].strip()) >= 50 for field in required_fields):
+                            print(f"Successfully extracted high-quality memory summary")
+                            return memory_summary
+                        else:
+                            print(f"Warning: Memory content too brief, requires more detailed analysis")
+                            return None
+                    else:
+                        print(f"Warning: Missing or empty required fields in model response: {list(memory_summary.keys())}")
+                        return None
+
+                except json.JSONDecodeError as e:
+                    print(f"Warning: Failed to parse JSON from model response: {e}")
+                    print(f"Response text: {response_text[:500]}...")
+                    return None
+
+            except Exception as e:
+                print(f"Error in model summarization: {e}")
+                return None
+
+
+    AgentKBProvider = MemoryProvider
+    MEMORY_SYSTEM = MemoryType.AGENT_KB.value
+
+    __all__ = ["MEMORY_SYSTEM", "MemoryProvider", "AgentKBProvider"]
+prompt_ready_example: |-
+  ## Example Harness: harness2
+
+  ### Harness Identity
+  - Planning system: concise_reflection
+  - Action system: concise_reflection
+  - Default memory system: agent_kb
+  - Default bench type: None
+  - Pairing reason: fallback_single_react
+
+  ### Description
+  Harness summary:
+  - Planning: explicit task planning with regular status summarization.
+  - Execution: one primary agent uses the current task tools directly.
+  - Memory: reusable workflow notes and prior solutions.
+  - Default bench: caller-provided
+
+  Coordination pattern:
+  - Start with a clearer plan than the base single-agent loop.
+  - Keep execution centralized in one active agent.
+  - Fall back cleanly when no harness-specific execution layer is available.
+
+  Runtime notes:
+  - Generated bundle: `harness2`
+  - The builder preserves the caller-provided `bench_type`.
+  - Benchmark-specific tools are loaded from `ActionContext` when available.
+  - The builder keeps the current `ActionContext` flow and only normalizes planning/action pairing.
+
+  ### Performance Snapshot
+  - Evaluated tasks: 80
+  - Exact accuracy: 51.25%
+  - Valid answer rate: 100.00%
+  - Average path score: 0.6744
+  - Average actions: 5.35
+  - Average tool calls: 5.4875
+  - Average total tokens: 37500.36
+  - Average runtime (sec): 60.79
+  - Source result file: output/toolhop_round1_harness2/toolhop_flash_searcher_flash_searcher_agent_kb_local_qwen3-aevolve_closed_results.jsonl
+
+  ### Performance Report
+  # harness2 Analysis
+
+  ## Structure
+  - Planning: explicit task planning with regular status summarization.
+  - Action: one primary agent uses the current task tools directly.
+  - Memory: reusable workflow notes and prior solutions.
+
+  ## Aggregate Metrics
+  - Evaluated tasks: 80
+  - Exact accuracy: 51.2%
+  - Valid answer rate: 100.0%
+  - Average path score: 0.6744
+  - Average actions: 5.35
+  - Average tool calls: 5.49
+  - Prompt / completion / total tokens: 2899146 / 100883 / 3000029
+  - Average prompt / completion / total tokens: 36239.32 / 1261.04 / 37500.36
+  - Total runtime: 81.06 min
+  - Average runtime per task: 60.79 sec
+
+  ## Overall Assessment
+  This is the strongest overall round1 harness in the current set because it combines the best exact accuracy with a relatively controlled cost profile. Its design stays close to the core ToolHop demand: clear planning, centralized execution, and modest memory assistance rather than aggressive branching. It is particularly well matched to multi-hop tool tasks that need stable sequential execution and careful tool selection. It is still weaker on strict string and datetime outputs, where the final normalization step remains less reliable than the retrieval chain itself.
+
+  ## Failure Pattern Analysis
+  - The harness still shows a noticeable path-to-answer drop, which means it often decomposes the task correctly but misses the exact benchmark target at the end.
+  - Compared with weaker harnesses, its failures are less about under-reasoning and more about imperfect finish quality. The agent usually does enough work; it just does not always translate that work into the exact final answer.
+  - Some residual tool-schema errors remain in the failed set, so part of the remaining gap is not deep reasoning weakness but imperfect API discipline under pressure.
+  - The harness is strongest on number-oriented tasks and clearly weaker on formatting-sensitive outputs. That pattern suggests the main bottleneck is not entity tracing, but answer rendering and post-processing.
+
+  ## Module-level Diagnosis
+  ### Planning
+  - What Helps: Explicit planning is one of the harness's strengths. It gives the main agent a clearer execution frame and seems to reduce wasted wandering relative to other direct-execution variants.
+  - What Hurts: Planning still does not fully lock down the final answer shape. The harness can know what to do without enforcing the exact final form that ToolHop expects.
+
+  ### Action
+  - What Helps: Centralized execution through one active agent is highly compatible with ToolHop. It preserves serial dependencies and avoids the coordination noise that hurts more parallel harnesses.
+  - What Hurts: The action loop is still missing a dedicated final verification layer for exact formatting and edge-case transformation. That is likely where much of the remaining accuracy gap lives.
+
+  ### Memory
+  - What Helps: Reusable workflow memory appears to be helping in a pragmatic way. It likely supports familiar call patterns and stable task routing without overwhelming the main loop.
+  - What Hurts: Memory is still a secondary aid rather than a precision mechanism. It improves fluency more than it guarantees correctness on tricky last-step transformations.
+
+  ### Bundle Files
+  <<<FILE:builder.py>>>
+  from __future__ import annotations
+
+  from dataclasses import replace
+  from pathlib import Path
+
+  from Agents.agents import ToolCallingAgent
+  from module_action.base_action import ActionContext
+  from .action_module.provider import ACTION_SYSTEM, get_provider
+  from .memory_module.provider import MEMORY_SYSTEM as DEFAULT_MEMORY_SYSTEM
+  from .planning_module.provider import PLANNING_SYSTEM, PlanningClass
+
+
+  HARNESS_NAME = "harness2"
+  DEFAULT_BENCH_TYPE = None
+  PAIRING_REASON = "fallback_single_react"
+
+
+  def _bind_agent_reference(agent: ToolCallingAgent, tool: object | None) -> None:
+      if tool is not None and hasattr(tool, "agent"):
+          setattr(tool, "agent", agent)
+
+
+  def _ensure_owl_memory(agent: ToolCallingAgent) -> None:
+      if getattr(agent, "planning_system", None) != "owl":
+          return
+      if not hasattr(agent, "web_memory") or agent.web_memory is None:
+          agent.web_memory = []
+      if not hasattr(agent, "reasoning_memory") or agent.reasoning_memory is None:
+          agent.reasoning_memory = []
+
+
+  def prepare_context(context: ActionContext) -> ActionContext:
+      bench_type = context.bench_type or DEFAULT_BENCH_TYPE
+      prompts_type = context.prompts_type or PLANNING_SYSTEM
+      prepared_kwargs = dict(context.kwargs)
+      prepared_kwargs["planning_class"] = PlanningClass
+      return replace(
+          context,
+          planning_system=PLANNING_SYSTEM,
+          action_system=ACTION_SYSTEM,
+          prompts_type=prompts_type,
+          bench_type=bench_type,
+          project_root=Path(__file__).resolve().parent,
+          kwargs=prepared_kwargs,
+      )
+
+
+  def build_agent_from_context(context: ActionContext) -> ToolCallingAgent:
+      prepared_context = prepare_context(context)
+      action_provider = get_provider()
+      agent = action_provider.build(prepared_context)
+
+      setattr(agent, "planning_system", prepared_context.planning_system)
+      setattr(agent, "action_system", prepared_context.action_system)
+      setattr(agent, "harness_name", HARNESS_NAME)
+      setattr(
+          agent,
+          "harness_metadata",
+          {
+              "planning_system": PLANNING_SYSTEM,
+              "action_system": ACTION_SYSTEM,
+              "default_bench_type": DEFAULT_BENCH_TYPE,
+              "recommended_memory_system": DEFAULT_MEMORY_SYSTEM,
+              "pairing_reason": PAIRING_REASON,
+          },
+      )
+
+      if prepared_context.vector_tool is not None:
+          prepared_context.vector_tool.memory = agent.memory
+
+      _bind_agent_reference(agent, prepared_context.process_tool)
+      _bind_agent_reference(agent, prepared_context.end_process_tool)
+      _bind_agent_reference(agent, prepared_context.delete_memory_tool)
+      _bind_agent_reference(agent, prepared_context.executor_tool)
+      _bind_agent_reference(agent, prepared_context.refine_tool)
+
+      _ensure_owl_memory(agent)
+      return agent
+  <<<END_FILE>>>
+  <<<FILE:Description.md>>>
+  Harness summary:
+  - Planning: explicit task planning with regular status summarization.
+  - Execution: one primary agent uses the current task tools directly.
+  - Memory: reusable workflow notes and prior solutions.
+  - Default bench: caller-provided
+
+  Coordination pattern:
+  - Start with a clearer plan than the base single-agent loop.
+  - Keep execution centralized in one active agent.
+  - Fall back cleanly when no harness-specific execution layer is available.
+
+  Runtime notes:
+  - Generated bundle: `harness2`
+  - The builder preserves the caller-provided `bench_type`.
+  - Benchmark-specific tools are loaded from `ActionContext` when available.
+  - The builder keeps the current `ActionContext` flow and only normalizes planning/action pairing.
+  <<<END_FILE>>>
+  <<<FILE:__init__.py>>>
+  from .builder import (
+      ACTION_SYSTEM,
+      DEFAULT_BENCH_TYPE,
+      DEFAULT_MEMORY_SYSTEM,
+      PAIRING_REASON,
+      PLANNING_SYSTEM,
+      HARNESS_NAME,
+      build_agent_from_context,
+  )
+
+  __all__ = [
+      "HARNESS_NAME",
+      "PLANNING_SYSTEM",
+      "ACTION_SYSTEM",
+      "DEFAULT_BENCH_TYPE",
+      "DEFAULT_MEMORY_SYSTEM",
+      "PAIRING_REASON",
+      "build_agent_from_context",
+  ]
+  <<<END_FILE>>>
+  <<<FILE:planning_module/provider.py>>>
+  import textwrap
+  from typing import Any, Callable, Dict, List, Optional
+  from jinja2 import StrictUndefined, Template
+
+  from Agents.memory import ActionStep, AgentMemory, PlanningStep, SummaryStep
+  from Agents.models import ChatMessage, MessageRole
+  from Agents.monitoring import AgentLogger, LogLevel
+  from Agents.tools import Tool
+  from rich.rule import Rule
+  from rich.text import Text
+  from module_planning.base_planning import BasePlanning
+
+  def populate_template(template: str, variables: Dict[str, Any]) -> str:
+      """
+      Fill Jinja2 template with variables.
+
+      Args:
+          template: Jinja2 template string
+          variables: Template variable dictionary
+
+      Returns:
+          str: Filled string
+      """
+      compiled_template = Template(template, undefined=StrictUndefined)
+      try:
+          return compiled_template.render(**variables)
+      except Exception as e:
+          raise Exception(f"Error during jinja template rendering: {type(e).__name__}: {e}")
+
+
+  class PlanningProvider(BasePlanning):
+      """
+      Planning implementation for a deliberate single-agent planner.
+
+      This class provides concrete implementations of planning methods:
+      - topology_initialize: Generates initial task plan (replaces planning_step)
+      - adaptation: Generates periodic progress summaries (replaces summary_step)
+      """
+
+      def __init__(
+          self,
+          model: Callable[[List[Dict[str, str]]], ChatMessage],
+          tools: Dict[str, Tool],
+          prompt_templates: Dict[str, Any],
+          memory: AgentMemory,
+          logger: AgentLogger
+      ):
+          super().__init__(model, tools, prompt_templates, memory, logger)
+
+      def topology_initialize(self, task: str) -> PlanningStep:
+          """
+          Generate initial task plan and record to memory and logger.
+
+          This method replaces the MultiStepAgent.planning_step() method with identical functionality:
+          1. Build planning prompt messages
+          2. Call LLM to generate plan
+          3. Extract plan content and reasoning process
+          4. Record to memory (via self.memory.steps.append)
+          5. Output to logger (via self.logger.log)
+
+          Args:
+              task: Task description to execute
+
+          Returns:
+              PlanningStep: Step object containing plan information with fields:
+                  - model_input_messages: Message list sent to model
+                  - plan: Generated plan text
+                  - plan_think: Plan thinking content (currently empty string)
+                  - plan_reasoning: Model reasoning content
+          """
+          # Build system prompt messages
+          input_messages = [
+              {
+                  "role": MessageRole.SYSTEM,
+                  "content": [
+                      {
+                          "type": "text",
+                          "text": populate_template(
+                              self.prompt_templates["planning"]["initial_plan"],
+                              variables={
+                                  "tools": self.tools,
+                              },
+                          ),
+                      }
+                  ],
+              },
+          ]
+          memory_guidance = self.append_memory_guidance(input_messages)
+
+          # Build task input messages
+          task_messages = [{
+              "role": MessageRole.USER,
+              "content": [{"type": "text", "text": populate_template(self.prompt_templates["planning"]["task_input"], variables={"task": task})}],
+          }]
+
+          # Call model to generate plan
+          chat_message_plan: ChatMessage = self.model(input_messages + task_messages)
+          think_content = chat_message_plan.reasoning_content
+          plans = chat_message_plan.content
+          plans_think, plans_answer = "", plans
+
+          # Format plan text for log output
+          final_plan_redaction = textwrap.dedent(
+              f"""Here is the plan of action that I will follow to solve the task:\n```\n{plans_answer}\n```\n"""
+          )
+
+          # Output to logger
+          self.logger.log(
+              Rule("[bold]Initial plan", style="orange"),
+              Text(final_plan_redaction),
+              level=LogLevel.INFO,
+          )
+
+          # Create PlanningStep object
+          planning_step = PlanningStep(
+              model_input_messages=input_messages,
+              plan=plans_answer,
+              plan_think=plans_think,
+              plan_reasoning=think_content,
+              memory_guidance=memory_guidance,
+          )
+
+          # Record to memory
+          self.memory.steps.append(planning_step)
+
+          return planning_step
+
+
+      def adaptation(
+          self,
+          task: str,
+          step: int,
+          write_memory_to_messages: Callable[[Optional[List[ActionStep]], Optional[bool]], List[Dict[str, str]]]
+      ) -> SummaryStep:
+          """
+          Generate execution progress summary and record to memory and logger.
+
+          This method replaces the MultiStepAgent.summary_step() method with identical functionality:
+          1. Read execution history from memory
+          2. Build summary prompt messages
+          3. Call LLM to generate summary
+          4. Extract summary content and reasoning process
+          5. Record to memory (via self.memory.steps.append)
+          6. Output to logger (via self.logger.log)
+
+          Args:
+              task: Task description to execute
+              step: Current step number for context prompting
+              write_memory_to_messages: Function to convert memory steps to message list
+
+          Returns:
+              SummaryStep: Step object containing summary information with fields:
+                  - model_input_messages: Message list sent to model
+                  - summary: Generated summary text
+                  - summary_reasoning: Model reasoning content
+          """
+          # Read execution history from memory (skip system prompt)
+          memory_messages = write_memory_to_messages(None, False)[1:]
+
+          # Build summary prompt pre and post messages
+          update_pre_messages = {
+              "role": MessageRole.SYSTEM,
+              "content": [{"type": "text", "text": self.prompt_templates["summary"]["update_pre_messages"]}],
+          }
+          update_post_messages = {
+              "role": MessageRole.USER,
+              "content": [{"type": "text", "text": self.prompt_templates["summary"]["update_post_messages"]}],
+          }
+
+          # Combine complete input messages
+          input_messages = [update_pre_messages] + memory_messages + [update_post_messages]
+
+          # Call model to generate summary
+          chat_message_summary: ChatMessage = self.model(input_messages)
+
+          summary_answer = chat_message_summary.content
+          summary_cot_content = chat_message_summary.reasoning_content
+
+          # Format summary text for log output
+          final_summary_redaction = textwrap.dedent(
+              f"""
+              Here is my summary of action to solve the task:
+              ```
+              {summary_answer}
+              ```"""
+          )
+
+          # Create SummaryStep object
+          summary_step = SummaryStep(
+              model_input_messages=input_messages,
+              summary=summary_answer,
+              summary_reasoning=summary_cot_content,
+          )
+
+          # Record to memory
+          self.memory.steps.append(summary_step)
+
+          # Output to logger
+          self.logger.log(
+              Rule("[bold]Summary", style="orange"),
+              Text(final_summary_redaction),
+              level=LogLevel.INFO,
+          )
+
+          return summary_step
+
+  PLANNING_SYSTEM = 'concise_reflection'
+  PLANNING_MODULE = 'concise_reflection'
+  PlanningClass = PlanningProvider
+
+  __all__ = ['PLANNING_SYSTEM', 'PLANNING_MODULE', 'PlanningProvider', 'PlanningClass']
+  <<<END_FILE>>>
+  <<<FILE:action_module/provider.py>>>
+  from __future__ import annotations
+
+  from typing import Any
+
+  from _harness_guards import ReflectionCriticTool
+  from module_action.base_action import ActionContext, BaseActionProvider
+
+
+  class ActionProvider(BaseActionProvider):
+      PROMPTS_TYPE = "concise_reflection"
+      DEFAULT_SUMMARY_INTERVAL = 4
+
+      def build_affordance(
+          self,
+          bench_type: str | None,
+          context: ActionContext,
+      ) -> list[Any]:
+          return self.get_primary_task_tools(context, include_reasoning=True)
+
+      def build_specification(
+          self,
+          context: ActionContext,
+          tools: list[Any],
+      ) -> None:
+          self.prompts_type = self.PROMPTS_TYPE
+          self.prompt_templates = self.load_prompt_templates(context, self.prompts_type)
+          self.organization_planning_system = context.planning_system
+
+      def build_organization(
+          self,
+          context: ActionContext,
+          tools: list[Any],
+      ):
+          verifier = ReflectionCriticTool(
+              context=context,
+              name="verify_before_final",
+              description=(
+                  "Non-environment verifier. Call before final_answer when the answer "
+                  "or completion claim is ready; it checks support, schema discipline, "
+                  "and repeated failures without touching the task environment."
+              ),
+          )
+          root_tools = self.normalize_tools([*tools, verifier])
+          agent = self.create_agent(
+              context,
+              tools=root_tools,
+              prompt_templates=self.prompt_templates,
+              prompts_type=self.prompts_type,
+              planning_system=self.organization_planning_system,
+          )
+          verifier.bind_agent(agent, root_tools)
+          if agent.summary_interval is None:
+              agent.summary_interval = self.DEFAULT_SUMMARY_INTERVAL
+          setattr(
+              agent,
+              "harness_policy",
+              {
+                  "mode": "concise_reflection",
+                  "plan_lines_max": 3,
+                  "reflection_interval": agent.summary_interval,
+                  "final_verifier": verifier.name,
+              },
+          )
+          return agent
+
+
+  ACTION_SYSTEM = "concise_reflection"
+  ACTION_MODULE = "concise_reflection"
+
+  ConciseReflectionActionProvider = ActionProvider
+
+
+  def get_provider():
+      return ActionProvider()
+
+
+  __all__ = [
+      "ACTION_SYSTEM",
+      "ACTION_MODULE",
+      "ActionProvider",
+      "get_provider",
+      "ConciseReflectionActionProvider",
+  ]
+  <<<END_FILE>>>
+  <<<FILE:memory_module/provider.py>>>
+  import json
+  import os
+  import uuid
+  from typing import List, Optional, Dict, Any
+  from collections import defaultdict
+  from dataclasses import dataclass, field
+  from datetime import datetime
+  import numpy as np
+  from sklearn.feature_extraction.text import TfidfVectorizer
+  from sklearn.metrics.pairwise import cosine_similarity
+  try:
+      from sentence_transformers import SentenceTransformer
+  except Exception:
+      SentenceTransformer = None
+  from module_memory.providers.model_loader import load_sentence_transformer
+
+  from module_memory.base_memory import BaseMemoryProvider, atomic_write_json, file_lock
+  from module_memory.memory_types import (
+      MemoryRequest,
+      MemoryResponse,
+      TrajectoryData,
+      MemoryType,
+      MemoryItem,
+      MemoryStatus
+  )
+
+  def load_embedding_model(model_name: str = 'sentence-transformers/all-MiniLM-L6-v2',
+                           cache_dir: str = './storage/models') -> Optional[SentenceTransformer]:
+      return load_sentence_transformer(
+          model_name=model_name,
+          cache_dir=cache_dir,
+          allow_unavailable=SentenceTransformer is None,
+      )
+
+
+  @dataclass
+  class WorkflowInstance:
+      workflow_id: str = field(default_factory=lambda: str(datetime.now().timestamp()))
+      query: str = ""
+      agent_planning: Optional[str] = None
+      search_agent_planning: Optional[str] = None
+      agent_experience: Optional[str] = None
+      search_agent_experience: Optional[str] = None
+      query_embedding: Optional[np.ndarray] = None
+      plan_embedding: Optional[np.ndarray] = None
+      search_plan_embedding: Optional[np.ndarray] = None
+
+
+  class AgenticKnowledgeBase:
+
+      def __init__(self, json_file_paths=None, model_cache_dir: str = './storage/models'):
+          self.workflows: Dict[str, WorkflowInstance] = {}
+          self.embedding_model = load_embedding_model(
+              model_name='sentence-transformers/all-MiniLM-L6-v2',
+              cache_dir=model_cache_dir
+          )
+
+          self.field_components = {
+              'query': {
+                  'vectorizer': TfidfVectorizer(stop_words='english'),
+                  'matrix': None,
+                  'workflow_ids': []
+              },
+          }
+
+          if json_file_paths:
+              self.load_initial_data(json_file_paths)
+              self.finalize_index()
+
+      def load_initial_data(self, json_file_paths):
+          for json_path in json_file_paths:
+              if not os.path.exists(json_path):
+                  raise FileNotFoundError(f'JSON file not found: {json_path}')
+              self.parse_json_file(json_path)
+
+      def _load_json_with_fallback(self, json_file_path: str):
+          for encoding in ("utf-8-sig", "utf-8", "gbk"):
+              try:
+                  with open(json_file_path, "r", encoding=encoding) as f:
+                      return json.load(f)
+              except UnicodeDecodeError:
+                  continue
+          with open(json_file_path, "r", encoding="utf-8", errors="replace") as f:
+              return json.load(f)
+
+      def parse_json_file(self, json_file_path):
+          try:
+              data = self._load_json_with_fallback(json_file_path)
+              batch = []
+              for item in data:
+                  try:
+                      instance = WorkflowInstance(
+                          query = item.get('question', ''),
+                          agent_planning = item.get('agent_planning'),
+                          search_agent_planning = item.get('search_agent_planning'),
+                          agent_experience = item.get('agent_experience'),
+                          search_agent_experience = item.get('search_agent_experience')
+                      )
+                      batch.append(instance)
+                  except KeyError as e:
+                      continue
+              for instance in batch:
+                  self.workflows[instance.workflow_id] = instance
+          except Exception as e:
+              print(f"Error parsing file: {json_file_path} | {e}")
+
+      def add_workflow_instance(self, workflow: WorkflowInstance):
+          self.workflows[workflow.workflow_id] = workflow
+          return workflow
+
+      def finalize_index(self):
+          self.build_tfidf_indices()
+          self.build_embeddings()
+
+      def build_tfidf_indices(self):
+          field_data = {
+              'query': [],
+          }
+
+          for workflow in self.workflows.values():
+              field_data['query'].append(workflow.query)
+
+          for field in ['query']:
+              if len(field_data[field]) == 0:
+                  continue
+
+              vectorizer = self.field_components[field]['vectorizer']
+              self.field_components[field]['matrix'] = vectorizer.fit_transform(field_data[field])
+              self.field_components[field]['workflow_ids'] = list(self.workflows.keys())
+
+      def build_embeddings(self):
+          if self.embedding_model is None:
+              for workflow in self.workflows.values():
+                  workflow.query_embedding = None
+              return
+
+          workflows = list(self.workflows.values())
+          batch_size = 32
+
+          queries = [w.query for w in workflows]
+          query_embeddings = self.embedding_model.encode(
+              queries,
+              batch_size=batch_size,
+              show_progress_bar=False,
+              convert_to_numpy=True
+          )
+
+          for i, workflow in enumerate(workflows):
+              workflow.query_embedding = query_embeddings[i]
+
+      def field_text_search(self, query: str, field: str, top_k: int = 3) -> List[dict]:
+          component = self.field_components[field]
+          if component['matrix'] is None or not component['workflow_ids']:
+              return []
+
+          query_vec = component['vectorizer'].transform([query])
+          similarities = cosine_similarity(query_vec, component['matrix']).flatten()
+          top_indices = similarities.argsort()[-top_k:][::-1]
+
+          return [{
+              'workflow_id': component['workflow_ids'][idx],
+              'score': float(similarities[idx]),
+              'field': field,
+              'content': getattr(self.workflows[component['workflow_ids'][idx]],
+                               field if field != 'search_plan' else 'search_agent_planning')
+          } for idx in top_indices]
+
+      def field_semantic_search(self, query: str, field: str, top_k: int = 3) -> List[dict]:
+          if self.embedding_model is None:
+              return []
+
+          query_embedding = self.embedding_model.encode(query, convert_to_numpy=True)
+
+          embedding_field_map = {
+              'query': 'query_embedding',
+          }
+
+          content_field_map = {
+              'query': 'query',
+          }
+
+          embeddings = []
+          workflows = []
+          for wf_id, workflow in self.workflows.items():
+              emb = getattr(workflow, embedding_field_map[field], None)
+              if emb is not None:
+                  embeddings.append(emb)
+                  workflows.append(workflow)
+
+          if not embeddings:
+              return []
+
+          similarities = cosine_similarity([query_embedding], embeddings)[0]
+          top_indices = similarities.argsort()[-top_k:][::-1]
+
+          return [{
+              'workflow_id': workflows[idx].workflow_id,
+              'score': float(similarities[idx]),
+              'field': field,
+              'content': getattr(workflows[idx], content_field_map[field], "")
+          } for idx in top_indices]
+
+
+  class AKB_Manager:
+
+      def __init__(self, json_file_paths=None, model_cache_dir: str = './storage/models'):
+          self.knowledge_base = AgenticKnowledgeBase(
+              json_file_paths=json_file_paths,
+              model_cache_dir=model_cache_dir
+          )
+
+      def hybrid_search(self, query: str, top_k: int = 5,
+                        weights: Dict[str, float] = None) -> List[dict]:
+          weights = weights or {'text': 0.5, 'semantic': 0.5}
+          field_weights = {'query': 1.0}
+
+          score_board = defaultdict(float)
+
+          for field in ['query']:
+              for result in self.knowledge_base.field_text_search(query, field, top_k*2):
+                  score_board[result['workflow_id']] += weights['text'] * field_weights[field] * result['score']
+              for result in self.knowledge_base.field_semantic_search(query, field, top_k*2):
+                  score_board[result['workflow_id']] += weights['semantic'] * field_weights[field] * result['score']
+
+          sorted_results = sorted(score_board.items(), key=lambda x: x[1], reverse=True)[:top_k]
+
+          detailed_results = []
+          for wf_id, total_score in sorted_results:
+              workflow = self.knowledge_base.workflows[wf_id]
+              detailed_results.append({
+                  'workflow_id': wf_id,
+                  'total_score': total_score,
+                  'query': workflow.query,
+                  'plan': workflow.agent_planning,
+                  'search_plan': workflow.search_agent_planning,
+                  'agent_experience': workflow.agent_experience,
+                  'search_agent_experience': workflow.search_agent_experience
+              })
+
+          return detailed_results
+
+      def search_by_text(self, query: str, field: str = "query", top_k: int = 3) -> List[dict]:
+          results = []
+          for result in self.knowledge_base.field_text_search(query, field, top_k):
+              workflow = self.get_workflow_details(result['workflow_id'])
+              results.append({
+                  'workflow_id': result['workflow_id'],
+                  'score': result['score'],
+                  'content': {
+                      'query': workflow.query,
+                      'plan': workflow.agent_planning,
+                      'search_plan': workflow.search_agent_planning,
+                      'agent_experience': workflow.agent_experience,
+                      'search_agent_experience': workflow.search_agent_experience
+                  }
+              })
+          return sorted(results, key=lambda x: x['score'], reverse=True)[:top_k]
+
+      def search_by_semantic(self, query: str, field: str = "query", top_k: int = 3) -> List[dict]:
+          results = []
+          for result in self.knowledge_base.field_semantic_search(query, field, top_k):
+              workflow = self.get_workflow_details(result['workflow_id'])
+              results.append({
+                  'workflow_id': result['workflow_id'],
+                  'score': result['score'],
+                  'content': {
+                      'query': workflow.query,
+                      'plan': workflow.agent_planning,
+                      'search_plan': workflow.search_agent_planning,
+                      'agent_experience': workflow.agent_experience,
+                      'search_agent_experience': workflow.search_agent_experience
+                  }
+              })
+          return sorted(results, key=lambda x: x['score'], reverse=True)[:top_k]
+
+      def get_workflow_details(self, workflow_id: str) -> Optional[WorkflowInstance]:
+          return self.knowledge_base.workflows.get(workflow_id)
+
+
+  class MemoryProvider(BaseMemoryProvider):
+
+      DEFAULT_PROMPTS = {
+          'student_agent_reason': """Extract key information from user query to construct efficient search terms for retrieving the most relevant results.
+
+  Requirements:
+  1. Analyze the user's question to identify core concepts, terminology, and keywords
+  2. Extract contextual information and constraints that may impact search quality
+  3. Break down complex questions into searchable components
+  4. Identify the domain, subject matter, and specific needs of the question
+
+  Output format:
+  <core concepts or topics of the question>
+
+  Ensure search terms are specific enough to retrieve relevant information while maintaining sufficient breadth to capture related cases.
+  Combine technical terminology with everyday expressions to optimize search effectiveness.
+
+  Here is the user query:
+  {{user_query}}"""
+      }
+
+      def __init__(self, config: Optional[dict] = None):
+          super().__init__(MemoryType.AGENT_KB, config)
+
+          self.kb_database_path = self.config.get(
+              "kb_database_path",
+              "./storage/agent_kb/agent_kb_database.json"
+          )
+          self.top_k = self.config.get("top_k", 3)
+          self.search_weights = self.config.get(
+              "search_weights",
+              {'text': 0.5, 'semantic': 0.5}
+          )
+
+          self.model_cache_dir = self.config.get(
+              "model_cache_dir",
+              "./storage/models"
+          )
+
+          self.model = self.config.get("model", None)
+          self.akb_manager: Optional[AKB_Manager] = None
+
+      def initialize(self) -> bool:
+          try:
+              os.makedirs(os.path.dirname(self.kb_database_path), exist_ok=True)
+
+              if not os.path.exists(self.kb_database_path):
+                  atomic_write_json(self.kb_database_path, [], indent=2)
+
+              self.akb_manager = AKB_Manager(
+                  json_file_paths=[self.kb_database_path],
+                  model_cache_dir=self.model_cache_dir
+              )
+              return True
+
+          except Exception as e:
+              print(f"Error initializing Agent KB provider: {e}")
+              return False
+
+      def _reason_for_retrieval(self, request: MemoryRequest) -> str:
+          if not self.model:
+              return request.query
+
+          reason_prompt = self.DEFAULT_PROMPTS['student_agent_reason']
+          prompt = reason_prompt.replace('{{user_query}}', request.query)
+
+          try:
+              messages = [
+                  {
+                      "role": "user",
+                      "content": [
+                          {
+                              "type": "text",
+                              "text": prompt
+                          }
+                      ]
+                  }
+              ]
+
+              response = self.model(messages)
+              refined_query = getattr(response, "content", str(response)).strip()
+
+              return refined_query if refined_query else request.query
+
+          except Exception as e:
+              print(f"Error in reasoning step: {e}")
+              return request.query
+
+      def provide_memory(self, request: MemoryRequest) -> MemoryResponse:
+          if not self.akb_manager:
+              return MemoryResponse(
+                  memories=[],
+                  memory_type=self.memory_type,
+                  total_count=0,
+                  request_id=str(uuid.uuid4())
+              )
+
+          if request.status != MemoryStatus.BEGIN:
+              return MemoryResponse(
+                  memories=[],
+                  memory_type=self.memory_type,
+                  total_count=0,
+                  request_id=str(uuid.uuid4())
+              )
+
+          try:
+              refined_query = self._reason_for_retrieval(request)
+
+              search_results = self.akb_manager.hybrid_search(
+                  query=refined_query,
+                  top_k=self.top_k,
+                  weights=self.search_weights
+              )
+
+              if not search_results:
+                  return MemoryResponse(
+                      memories=[],
+                      memory_type=self.memory_type,
+                      total_count=0,
+                      request_id=str(uuid.uuid4())
+                  )
+
+              synthesized_content = self._synthesize_all_memories(search_results, request)
+
+              memory_item = MemoryItem(
+                  id=f"synthesized_{uuid.uuid4()}",
+                  content=synthesized_content,
+                  metadata={
+                      'num_sources': len(search_results),
+                      'source_queries': [r['query'] for r in search_results],
+                      'avg_score': sum(r['total_score'] for r in search_results) / len(search_results),
+                      'status': request.status.value,
+                      'original_query': request.query,
+                      'refined_query': refined_query
+                  },
+                  score=sum(r['total_score'] for r in search_results) / len(search_results)
+              )
+
+              return MemoryResponse(
+                  memories=[memory_item],
+                  memory_type=self.memory_type,
+                  total_count=1,
+                  request_id=str(uuid.uuid4())
+              )
+
+          except Exception as e:
+              print(f"Error providing memory: {e}")
+              return MemoryResponse(
+                  memories=[],
+                  memory_type=self.memory_type,
+                  total_count=0,
+                  request_id=str(uuid.uuid4())
+              )
+
+      def _synthesize_all_memories(self, results: List[Dict[str, Any]], request: MemoryRequest) -> str:
+          try:
+              if request.status == MemoryStatus.BEGIN:
+                  student_guidance = self._synthesize_student_guidance(results, request)
+                  teacher_guidance = self._synthesize_teacher_guidance(results, request)
+
+                  return (
+                      "AGENT-KB Student Guidance:\n"
+                      f"{student_guidance}\n\n"
+                      "AGENT-KB Teacher Guidance:\n"
+                      f"{teacher_guidance}"
+                  )
+
+              queries = [r['query'] for r in results if r.get('query')]
+              return f"AGENT-KB Guidance: {'; '.join(queries)}"
+
+          except Exception as e:
+              print(f"Error synthesizing memories: {e}")
+              queries = [r.get('query', '') for r in results if r.get('query')]
+              joined = '; '.join(queries) if queries else results[0].get('query', '')
+              return f"AGENT-KB Guidance: {joined}"
+
+      def _synthesize_student_guidance(self, results: List[Dict[str, Any]], request: MemoryRequest) -> str:
+          try:
+              if not self.model:
+                  all_plans = []
+                  for r in results:
+                      if r.get('plan'):
+                          all_plans.append(r['plan'])
+                      if r.get('search_plan'):
+                          all_plans.append(r['search_plan'])
+                  return ' '.join(all_plans) if all_plans else results[0].get('query', '')
+
+              all_planning_content = []
+              for i, result in enumerate(results, 1):
+                  source_parts = []
+
+                  if result.get('query'):
+                      source_parts.append(f"Similar task:\n{result['query']}")
+
+                  suggestions = []
+                  if result.get('plan'):
+                      suggestions.append(result['plan'])
+                  if result.get('search_plan'):
+                      suggestions.append(result['search_plan'])
+
+                  if suggestions:
+                      source_parts.append(f"Suggestions:\n{' '.join(suggestions)}")
+
+                  if source_parts:
+                      all_planning_content.append('\n'.join(source_parts))
+
+              if not all_planning_content:
+                  return results[0].get('query', '')
+
+              matched_content = "\n\n".join(all_planning_content)
+
+              prompt = f"""Analyze similar tasks and past experiences to generate concise, actionable suggestions for improving the current plan. Based on the patterns identified in relevant tasks and insights from the knowledge base, provide specific recommendations.
+
+  **Key Requirements:**
+  1. Focus exclusively on technical/behavioral improvements derived from similar task patterns and experience.
+  2. Provide root-cause solutions and implementation strategies based on past successes.
+  3. Provide 2-3 specific suggestions only.
+  4. Format output strictly as:
+     1. [Specific suggestion 1]
+     2. [Specific suggestion 2]
+     ...
+  5. Use gentle, suggestive language rather than directive commands.
+  No headings, explanations, or markdown.
+
+  **Current Task:** {request.query}
+
+  **You can refer to similar tasks, plans, and corresponding experience to provide your suggestions:**
+  {matched_content}"""
+
+              messages = [
+                  {
+                      "role": "user",
+                      "content": [
+                          {"type": "text", "text": prompt}
+                      ]
+                  }
+              ]
+
+              response = self.model(messages)
+              guidance = getattr(response, "content", str(response)).strip()
+
+              return guidance if guidance else '; '.join([r.get('query', '') for r in results])
+
+          except Exception as e:
+              print(f"Error synthesizing student guidance: {e}")
+              return results[0].get('query', '')
+
+      def _synthesize_teacher_guidance(self, results: List[Dict[str, Any]], request: MemoryRequest) -> str:
+          try:
+              if not self.model:
+                  all_experiences = []
+                  for r in results:
+                      if r.get('agent_experience'):
+                          all_experiences.append(r['agent_experience'])
+                      if r.get('search_agent_experience'):
+                          all_experiences.append(r['search_agent_experience'])
+                  return ' '.join(all_experiences) if all_experiences else results[0].get('query', '')
+
+              all_experience_content = []
+              for i, result in enumerate(results, 1):
+                  source_content = []
+                  if result.get('query'):
+                      source_content.append(f"Query: {result['query']}")
+                  if result.get('agent_experience'):
+                      source_content.append(f"Agent Experience: {result['agent_experience']}")
+                  if result.get('search_agent_experience'):
+                      source_content.append(f"Search Experience: {result['search_agent_experience']}")
+
+                  if source_content:
+                      all_experience_content.append(
+                          f"Source {i} (Score: {result.get('total_score', 0):.3f}):\n" +
+                          "\n".join(source_content)
+                      )
+
+              if not all_experience_content:
+                  return results[0].get('query', '')
+
+              agent_context = ""
+              if request and request.context:
+                  max_context_length = 1000
+                  truncated_context = request.context
+                  if len(request.context) > max_context_length:
+                      truncated_context = "... [truncated]\n" + request.context[-max_context_length:]
+                  agent_context = f"\n\nCurrent Agent Context:\n{truncated_context}"
+
+              matched_content = "\n\n".join(all_experience_content)
+
+              prompt = f"""You are an experienced AI agent teacher synthesizing multiple experience entries to provide unified operational guidance.
+
+  Current Task: {request.query}
+
+  Retrieved Experience Entries ({len(results)} sources):
+  {matched_content}{agent_context}
+
+  Based on ALL the matched experience above, synthesize cohesive, unified operational guidance for the agent. Your guidance should:
+
+  1. Integrate techniques and methods from all sources
+  2. Combine common pitfalls and best practices across sources
+  3. Provide specific, actionable execution tips
+
+  Requirements:
+  - Be specific and comprehensive (2-3 sentences)
+  - Focus on detailed operations and practical techniques
+  - Present a unified perspective synthesizing all sources
+  - Provide concrete, actionable suggestions
+  - Help refine and improve the current approach based on collective experience
+  - Use gentle, suggestive language rather than directive commands.
+  Provide only the synthesized guidance text with no additional explanations or source references."""
+
+              messages = [
+                  {
+                      "role": "user",
+                      "content": [
+                          {"type": "text", "text": prompt}
+                      ]
+                  }
+              ]
+
+              response = self.model(messages)
+              guidance = getattr(response, "content", str(response)).strip()
+
+              return guidance if guidance else '; '.join([r.get('query', '') for r in results])
+
+          except Exception as e:
+              print(f"Error synthesizing teacher guidance: {e}")
+              return results[0].get('query', '')
+
+
+
+      def take_in_memory(self, trajectory_data: TrajectoryData) -> tuple[bool, str]:
+          """
+          Ingest new memory by intelligently summarizing trajectory with model
+          Only processes successful task executions
+          """
+          try:
+              if not self.model:
+                  error_msg = "Error: No model provided for memory summarization"
+                  print(error_msg)
+                  return False, error_msg
+
+              # Check if task was successful before processing
+              if not self._is_task_successful(trajectory_data):
+                  msg = "Skipping memory ingestion: Task was not successful"
+                  print(msg)
+                  return False, msg
+
+              # Use model to intelligently summarize the trajectory
+              memory_summary = self._summarize_trajectory_with_model(trajectory_data)
+
+              if not memory_summary:
+                  error_msg = "Error: Model summarization failed"
+                  print(error_msg)
+                  return False, error_msg
+
+              # Create new workflow instance data with model-generated summaries
+              new_workflow = {
+                  "question": trajectory_data.query,
+                  "agent_planning": memory_summary.get("agent_planning", ""),
+                  "search_agent_planning": memory_summary.get("search_agent_planning", ""),
+                  "agent_experience": memory_summary.get("agent_experience", ""),
+                  "search_agent_experience": memory_summary.get("search_agent_experience", ""),
+                  "timestamp": datetime.now().isoformat(),
+                  "metadata": trajectory_data.metadata or {}
+              }
+
+              # Append to database file (ensure dir)
+              os.makedirs(os.path.dirname(self.kb_database_path), exist_ok=True)
+              with file_lock(self.kb_database_path):
+                  if os.path.exists(self.kb_database_path):
+                      try:
+                          with open(self.kb_database_path, 'r', encoding='utf-8') as f:
+                              data = json.load(f)
+                      except Exception:
+                          data = []
+                  else:
+                      data = []
+
+                  if not isinstance(data, list):
+                      data = []
+
+                  data.append(new_workflow)
+                  atomic_write_json(self.kb_database_path, data, indent=2)
+
+              # Reinitialize the manager to include new data
+              self.akb_manager = AKB_Manager(json_file_paths=[self.kb_database_path])
+
+              absorbed_memory = f"Summarized trajectory: {memory_summary}"
+              return True, absorbed_memory
+
+          except Exception as e:
+              error_msg = f"Error taking in memory: {e}"
+              print(error_msg)
+              return False, error_msg
+
+      def _is_task_successful(self, trajectory_data: TrajectoryData) -> bool:
+          try:
+              metadata = trajectory_data.metadata or {}
+
+              if 'is_correct' in metadata:
+                  return metadata['is_correct'] is True
+
+              if 'success' in metadata:
+                  return metadata['success'] is True
+              if 'task_success' in metadata:
+                  return metadata['task_success'] is True
+
+              return False
+
+          except Exception as e:
+              print(f"Error determining task success: {e}")
+              return False
+
+      def _format_trajectory_for_model(self, trajectory_data: TrajectoryData) -> str:
+          if not trajectory_data.trajectory:
+              return "No execution trajectory available"
+
+          trajectory_parts = []
+          trajectory_parts.append(f"Task: {trajectory_data.query}")
+          trajectory_parts.append("")
+
+          for i, step in enumerate(trajectory_data.trajectory, 1):
+              step_type = step.get('type', 'step')
+              content = step.get('content', '')
+              trajectory_parts.append(f"Step {i} ({step_type}): {content}")
+
+          if trajectory_data.result:
+              trajectory_parts.append("")
+              trajectory_parts.append(f"Final Result: {trajectory_data.result}")
+
+          return "\n".join(trajectory_parts)
+
+      def _summarize_trajectory_with_model(self, trajectory_data: TrajectoryData) -> Optional[Dict[str, str]]:
+          """
+          Use model to intelligently summarize the trajectory into structured memory components
+          """
+          try:
+              # Prepare trajectory content for model
+              trajectory_text = self._format_trajectory_for_model(trajectory_data)
+
+              # Create enhanced summarization prompt based on high-quality examples
+              prompt = f"""You are an expert AI agent trainer analyzing a successful task execution to extract high-quality memory patterns for future similar tasks.
+
+  TASK ANALYSIS:
+  Question: {trajectory_data.query}
+
+  Execution Trajectory:
+  {trajectory_text}
+
+  Final Result: {trajectory_data.result if trajectory_data.result else "Task completed successfully"}
+
+  MEMORY EXTRACTION INSTRUCTIONS:
+  Extract structured memory components that capture the strategic thinking and methodological approaches used in this successful execution. Focus on actionable insights, specific techniques, and reusable patterns.
+
+  Please provide detailed analysis in the following JSON format:
+
+  {{
+      "agent_planning": "Detailed strategic planning approach with numbered steps, decision-making criteria, tool selection rationale, and problem decomposition strategy",
+      "search_agent_planning": "Comprehensive search strategy including query formulation techniques, source prioritization methods, information extraction approaches, and result validation processes",
+      "agent_experience": "Key lessons learned, successful methodologies, best practices discovered, error avoidance strategies, and general principles that can guide future similar tasks",
+      "search_agent_experience": "Search-specific insights including effective query patterns, reliable source types, information validation techniques, and data processing approaches"
+  }}
+
+  QUALITY REQUIREMENTS:
+  1. Each field must contain substantial, specific content (minimum 2-3 detailed sentences)
+  2. Focus on ACTIONABLE strategies and CONCRETE methodologies, not generic descriptions
+  3. Include specific decision points, tool choices, and reasoning patterns
+  4. Emphasize successful techniques that led to task completion
+  5. Extract transferable knowledge that applies to similar problem types
+  6. Use professional, instructional language as if training another agent
+  7. Include specific examples or patterns where applicable
+
+  EXAMPLES OF HIGH-QUALITY CONTENT:
+  - Agent Planning: "1. Decompose the inquiry: Identify entities using biographical clues... 2. Data/Tool Use Decisions: Use search to resolve identity and find detailed biography... 3. Delegation Strategy: Author identification requires multi-clue queries..."
+  - Search Experience: "Construct layered queries that combine multiple discriminators (facts, dates, roles) to improve specificity... Select sources with documented editorial oversight..."
+
+  Return ONLY the JSON object with no additional text or explanations."""
+
+              # Call model for summarization using proper message format
+              messages = [
+                  {
+                      "role": "user",
+                      "content": [
+                          {
+                              "type": "text",
+                              "text": prompt
+                          }
+                      ]
+                  }
+              ]
+
+              try:
+                  response = self.model(messages)
+                  response_text = response.content if hasattr(response, 'content') else str(response)
+              except Exception as e:
+                  print(f"Error calling model: {e}")
+                  return None
+
+              # Extract JSON from response
+              try:
+                  # Try to find JSON in response
+                  import re
+
+                  # First try to parse the entire response as JSON
+                  try:
+                      memory_summary = json.loads(response_text.strip())
+                  except json.JSONDecodeError:
+                      # If that fails, try to extract JSON block
+                      json_match = re.search(r'\{.*?\}', response_text, re.DOTALL)
+                      if json_match:
+                          json_str = json_match.group(0)
+                          memory_summary = json.loads(json_str)
+                      else:
+                          print(f"Warning: No JSON found in model response: {response_text[:500]}...")
+                          return None
+
+                  # Validate required fields and content quality
+                  required_fields = ["agent_planning", "search_agent_planning", "agent_experience", "search_agent_experience"]
+                  if all(field in memory_summary and memory_summary[field].strip() for field in required_fields):
+                      # Additional quality check - ensure substantial content
+                      if all(len(memory_summary[field].strip()) >= 50 for field in required_fields):
+                          print(f"Successfully extracted high-quality memory summary")
+                          return memory_summary
+                      else:
+                          print(f"Warning: Memory content too brief, requires more detailed analysis")
+                          return None
+                  else:
+                      print(f"Warning: Missing or empty required fields in model response: {list(memory_summary.keys())}")
+                      return None
+
+              except json.JSONDecodeError as e:
+                  print(f"Warning: Failed to parse JSON from model response: {e}")
+                  print(f"Response text: {response_text[:500]}...")
+                  return None
+
+          except Exception as e:
+              print(f"Error in model summarization: {e}")
+              return None
+
+
+  AgentKBProvider = MemoryProvider
+  MEMORY_SYSTEM = MemoryType.AGENT_KB.value
+
+  __all__ = ["MEMORY_SYSTEM", "MemoryProvider", "AgentKBProvider"]
+  <<<END_FILE>>>
+  <<<FILE:planning_module/prompts/toolcalling_agent.yaml>>>
+  planning:
+    initial_plan: |-
+      You are the concise planner for a single-executor tool agent.
+
+      Produce at most 3 short lines:
+      1. What evidence or state changes are needed.
+      2. The safest first tool/action direction.
+      3. The stop condition and final verifier condition.
+
+      Do not create subtasks, dependency graphs, parallel workers, debate, or long plans.
+      Mention that failed calls require changed arguments, a changed tool, or finalization if enough evidence exists.
+    task_input: |-
+      Task:
+      {{task}}
+  summary:
+    update_pre_messages: |-
+      You are the concise reflection module for a single-executor tool agent.
+
+      Review only the recent trajectory. Focus on:
+      - established observations
+      - repeated or failed calls
+      - the next valid tool/action
+      - whether the agent should call verify_before_final and then final_answer
+    update_post_messages: |-
+      Return at most 5 lines:
+      evidence:
+      failed_or_repeated:
+      next_action:
+      verifier_needed: yes/no
+      ready_to_final: yes/no
+  <<<END_FILE>>>
+  <<<FILE:action_module/prompts/toolcalling_agent.yaml>>>
+  system_prompt: |-
+    You are a concise reflection tool-using assistant.
+
+    Operate as one executor, not a team. Keep the plan short, use the provided tools directly, reflect every few steps, and verify before the final answer.
+
+    Core rules:
+    - Use only tool names and argument keys from the current schema.
+    - Prefer one tool call per step.
+    - Do not invent tools, records, files, IDs, APIs, or observations.
+    - If a tool fails, the next attempt must change the tool, change the arguments, or stop if enough evidence exists.
+    - When the answer or state completion seems ready, call verify_before_final once, then call final_answer or the task terminal tool.
+    - For state-changing tasks, preserve transaction order and avoid speculative updates.
+
+    Return strict JSON only:
+    {
+      "think": "brief next-step reasoning",
+      "tools": [
+        {"name": "actual_tool_name", "arguments": {"arg": "value"}}
+      ]
+    }
+
+  final_answer:
+    pre_messages: |-
+      Produce the final answer only after checking the trajectory and verifier feedback.
+
+    post_messages: |-
+      Return strict JSON only:
+
+      {
+        "think": "brief reason why the answer is supported",
+        "answer": "the final answer"
+      }
+
+      Rules:
+      - The answer field must contain only the requested answer or completion result.
+      - Base the answer on observations only.
+      - For short-answer or retrieval-style QA tasks, return the raw short answer.
+      - For stateful tasks, only claim completion when required state changes or the terminal completion tool support it.
+
+      Task:
+      {{task}}
+
+  step:
+    pre_messages: |-
+      Continue the concise single-executor loop.
+
+      Available tool schemas:
+      {{tool_functions_json}}
+
+      Original task:
+      {{task}}
+
+      Decision checklist:
+      - What is the one missing fact or state transition?
+      - Does the next tool name exist exactly in the schema?
+      - Are the argument keys copied from the schema?
+      - Did the same call already fail? If yes, change strategy.
+      - Is the answer already supported? If yes, call verify_before_final, then final_answer.
+
+      Return strict JSON only:
+      {
+        "think": "brief reasoning",
+        "tools": [
+          {"name": "actual_tool_name", "arguments": {"arg": "value"}}
+        ]
+      }
+  <<<END_FILE>>>

@@ -1,0 +1,41 @@
+schema_version: 1
+backbone: "8B"
+base_model: "Qwen3-8B"
+source_table: "round3 evolved harness-policy pair shortlist"
+harness_package: "evolved_pairs.harness_factory"
+pairs:
+  toolhop:
+    display_name: "ToolHop"
+    table_entry: "01_harness5"
+    harness: "rounds.round_03_01.harness_round03_01_5"
+    harness_path: "harness_factory/rounds/round_03_01/harness_round03_01_5"
+    policy: "qwen3-8B-round_03_01-harness5"
+    policy_path: "policy_factory/qwen3-8B-round_03_01-harness5"
+  searchqa_hotpotqa:
+    display_name: "HotpotQA"
+    table_entry: "03_harness6"
+    harness: "rounds.round_03_03.harness_round03_03_6"
+    harness_path: "harness_factory/rounds/round_03_03/harness_round03_03_6"
+    policy: "qwen3-8B-round_03_03-harness6"
+    policy_path: "policy_factory/qwen3-8B-round_03_03-harness6"
+  searchqa_2wikimultihopqa:
+    display_name: "2WikiQA"
+    table_entry: "03_harness6"
+    harness: "rounds.round_03_03.harness_round03_03_6"
+    harness_path: "harness_factory/rounds/round_03_03/harness_round03_03_6"
+    policy: "qwen3-8B-round_03_03-harness6"
+    policy_path: "policy_factory/qwen3-8B-round_03_03-harness6"
+  restbench_tmdb:
+    display_name: "TMDB"
+    table_entry: "04_harness1"
+    harness: "rounds.round_03_04.harness_round03_04_1"
+    harness_path: "harness_factory/rounds/round_03_04/harness_round03_04_1"
+    policy: "qwen3-8B-round_03_04-harness1"
+    policy_path: "policy_factory/qwen3-8B-round_03_04-harness1"
+  api_bank:
+    display_name: "API-Bank"
+    table_entry: "01_harness5"
+    harness: "rounds.round_03_01.harness_round03_01_5"
+    harness_path: "harness_factory/rounds/round_03_01/harness_round03_01_5"
+    policy: "qwen3-8B-round_03_01-harness5"
+    policy_path: "policy_factory/qwen3-8B-round_03_01-harness5"

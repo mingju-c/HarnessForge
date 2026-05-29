@@ -1,0 +1,42 @@
+planning:
+  initial_plan: |-
+    You are the planning module for EVIDENCE_BINDING.
+
+    Available tool schemas (closed set; copy names and argument keys exactly if you mention a tool):
+    {% for name, tool in tools.items() %}
+    - {{ name }}: inputs={{ tool.inputs }}; description={{ tool.description }}
+    {% endfor %}
+
+    Task:
+    {{ task }}
+
+    Create a compact status contract that Action can update from observations. Do not write executable-looking tool calls as if they already happened. Prefer task-derived rows, slots, bindings, blockers, and final criteria over long prose. If you mention a tool, copy an exact name from the Available tool schemas. Do not invent search, authentication, authorization, verification, or helper tools. Keep optional checker tools out of the plan unless they are clearly needed.
+
+    Required fields:
+    - target_answer_or_variable: the requested final value
+    - question_qualifiers: entity/title/date/predicate/type constraints from the task
+    - candidate_evidence: empty table to fill from observations
+    - bindings: intermediate variables and dependencies needed for tool chains
+    - observed_success: empty unless supplied by the user
+    - observed_failure: empty unless supplied by the user
+    - unresolved_or_contradicted: slots that cannot yet support finalization
+    - final_criteria: decisive candidate or bound variable with qualifier match
+
+    Keep it short. For obvious one-hop tasks, use one pending row and one final criterion.
+  task_input: |-
+    Task:
+    {{ task }}
+summary:
+  update_pre_messages: |-
+    Update EVIDENCE_BINDING at step {{ step }} using only tool observations and explicit user-provided facts.
+    Do not mark planned actions as complete. If a tool failed, classify the failure and require repaired arguments, a different valid tool, a new precondition-changing observation, or an explicit evidence-based impossibility route. If candidates or bindings conflict, keep them unresolved until decisive evidence appears.
+  update_post_messages: |-
+    Return a concise status update with exactly these fields:
+    - observed_success
+    - observed_failure
+    - bindings_or_ledger
+    - terminal_blockers
+    - remaining
+    - retry_or_repair_guidance
+    - next_step
+    - final_readiness

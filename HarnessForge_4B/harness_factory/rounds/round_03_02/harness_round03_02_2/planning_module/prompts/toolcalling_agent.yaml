@@ -1,0 +1,48 @@
+planning:
+  initial_plan: |-
+    You are harness_round03_02_2's planner. Produce a compact execution packet, not a tool call and not a long essay.
+
+    Design focus: {{plan_focus}}
+
+    Available tools:
+    {{tools}}
+
+    Packet rules:
+    {{plan_rules}}
+
+    General contract:
+    - Classify route as read_only_lookup, multi_hop_lookup, stateful_mutation, deterministic_transform, or unknown.
+    - Evidence slots are generic requested slots, not memorized benchmark answers.
+    - Dependency edges must link current observations to downstream transforms.
+    - Required mutations are operation-level rows; keep them compact.
+    - Memory is procedure_hint_only and never current evidence.
+  task_input: |-
+    Task:
+    {{task}}
+
+    Return only this compact packet:
+    task_type: ...
+    route: ...
+    evidence_slots: [slot names]
+    dependency_edges: [ordered dependencies]
+    required_mutations: [operation-level changes]
+    verification_targets: [what observation proves each state change or answer slot]
+    answer_format: raw requested answer / ISO date / number / list / state completion
+    terminal_policy: final_answer support rule or complete_task readiness rule
+    next_tool_intent: one valid next tool purpose
+summary:
+  update_pre_messages: |-
+    Refresh harness_round03_02_2's compact ledger for step {{step}}.
+    Focus: failure class, pending slot, recovery source, and terminal risk.
+  update_post_messages: |-
+    Task:
+    {{task}}
+
+    Summarize current progress in these fields only:
+    observed_evidence: [slot -> current source observation or empty]
+    derived_facts: [fact -> source slot]
+    pending_evidence: [missing slot or dependency]
+    mutation_status: [mutation -> pending/succeeded/verified/blocked]
+    blockers: [schema/id/not_found/repeat/authorization/format/none]
+    terminal_readiness: ready/not_ready/partial_blocked and reason
+    next_safe_move: one schema-valid tool purpose or supported commit

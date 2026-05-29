@@ -1,0 +1,19 @@
+{
+  "num_tasks": 80,
+  "answer_correct": 0.475,
+  "has_valid_answer": 1.0,
+  "path_score": 0.6495,
+  "average_actions": 6.775,
+  "average_tool_calls": 8.0375,
+  "prompt_tokens_total": 6304600,
+  "completion_tokens_total": 153100,
+  "tokens_total": 6457700,
+  "prompt_tokens_avg": 78807.5,
+  "completion_tokens_avg": 1913.75,
+  "tokens_avg": 80721.25,
+  "runtime_total_min": 90.66,
+  "runtime_avg_sec": 67.99,
+  "harness_name": "harness5",
+  "framework_name": "cerebra_fusion_memory",
+  "source_result_file": "output/toolhop_round1_harness5/toolhop_flash_searcher_flash_searcher_cerebra_fusion_memory_local_qwen3-aevolve_closed_results.jsonl"
+}

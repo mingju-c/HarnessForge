@@ -1,0 +1,30 @@
+planning:
+  initial_plan: |
+    Analyze the user objective and decompose it into a list of specific sub-tasks.
+    Objective: {{task}}
+
+    Respond only with a valid JSON list of tasks. Each task must be a dictionary with:
+    - 'description': a clear explanation of the sub-task
+    - 'priority': 'low', 'medium', or 'high'
+    - 'category': a short tag such as 'research', 'analysis', 'coding', 'inspection', or 'validation'
+
+    Example format:
+    [
+      {"description": "Inspect the relevant schema or sources needed for the answer", "priority": "high", "category": "inspection"},
+      {"description": "Analyze the gathered evidence and derive the final result", "priority": "medium", "category": "analysis"}
+    ]
+  task_input: 'User Objective: {{task}}'
+summary:
+  update_pre_messages: Review the execution trajectory of the AGENTORCHESTRA sub-tasks.
+  update_post_messages: |
+    ### Strategic Evidence Review (Step {{step}}):
+    Task Roadmap Status: {{orchestra_tasks}}
+
+    User Objective: {{task}}
+
+    Your Goal: Analyze current progress and create a strategic evidence ledger.
+    1. Consolidated Findings: Extract the key evidence, results, intermediate outputs, and salient artifacts found so far.
+    2. Task Progress: Which tasks are done? Which still need more work?
+    3. Next Move: What is the single most important next step?
+
+    This summary serves as core memory to prevent loss of detail in long trajectories.

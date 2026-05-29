@@ -1,0 +1,2253 @@
+metadata:
+  harness_name: harness3
+  default_bench_type: null
+  pairing_reason: matched_same_name
+  planning_system: guarded_joy_agent
+  action_system: guarded_joy_agent
+  default_memory_system: memp
+  source_root: harness_factory/rounds/round_00_base/harness3
+artifact_paths:
+  harness_root: harness_factory/rounds/round_00_base/harness3
+  description_path: harness_factory/rounds/round_00_base/harness3/Description.md
+  report_path: harness_factory/rounds/round_00_base/harness3/report.md
+  metrics_path: harness_factory/rounds/round_00_base/harness3/metrics.json
+description_markdown: |-
+  Harness summary:
+  - Planning: augment the task, retrieve relevant memory, then route work deliberately.
+  - Execution: a small mixed team combines one structured worker with several adaptive workers.
+  - Memory: reusable skill-like procedures can be surfaced during execution.
+  - Default bench: caller-provided
+
+  Coordination pattern:
+  - Use one stable planner-executor for high-precision work.
+  - Run several adaptive workers for broader exploration.
+  - Compare the returned candidates before committing to an answer.
+
+  Runtime notes:
+  - Generated bundle: `harness3`
+  - The builder preserves the caller-provided `bench_type`.
+  - Benchmark-specific tools are loaded from `ActionContext` when available.
+  - The builder keeps the current `ActionContext` flow and only normalizes planning/action pairing.
+profile_metrics:
+  num_tasks: 80
+  answer_correct: 0.4125
+  has_valid_answer: 1.0
+  path_score: 0.6132
+  average_actions: 2.0
+  average_tool_calls: 2.0
+  prompt_tokens_total: 1690650
+  completion_tokens_total: 29588
+  tokens_total: 1720238
+  prompt_tokens_avg: 21133.12
+  completion_tokens_avg: 369.85
+  tokens_avg: 21502.97
+  runtime_total_min: 121.63
+  runtime_avg_sec: 91.22
+  harness_name: harness3
+  framework_name: skillweaver
+  source_result_file: output/toolhop_round1_harness3/toolhop_flash_searcher_flash_searcher_skillweaver_local_qwen3-aevolve_closed_results.jsonl
+profile_report_markdown: |-
+  # harness3 Analysis
+
+  ## Structure
+  - Planning: augment the task, retrieve relevant memory, then route work deliberately.
+  - Action: a small mixed team combines one structured worker with several adaptive workers.
+  - Memory: reusable skill-like procedures can be surfaced during execution.
+
+  ## Aggregate Metrics
+  - Evaluated tasks: 80
+  - Exact accuracy: 41.2%
+  - Valid answer rate: 100.0%
+  - Average path score: 0.6132
+  - Average actions: 2.00
+  - Average tool calls: 2.00
+  - Prompt / completion / total tokens: 1690650 / 29588 / 1720238
+  - Average prompt / completion / total tokens: 21133.12 / 369.85 / 21502.97
+  - Total runtime: 121.63 min
+  - Average runtime per task: 91.22 sec
+
+  ## Overall Assessment
+  This harness is interesting because it gets meaningful value from structured candidate generation, but not enough value from the later synthesis layer. The cost profile is not low in wall-clock terms, yet the action depth stays very shallow because most of the work is hidden inside bundled ensemble steps. It is more suitable for tasks where multiple candidate answers can be generated and compared without strict serial dependency management. It is less suitable for ToolHop cases where one wrong vote or one bad synthesis choice can override a correct intermediate chain.
+
+  ## Failure Pattern Analysis
+  - The dominant weakness is synthesis failure rather than search failure. In several cases the harness appears to have access to a correct candidate, but the vote-and-synthesize stage still lands on the wrong final answer.
+  - Because the harness compresses a lot of reasoning into `ensemble_executor` and `vote_and_synthesize`, it becomes harder to recover once the aggregation layer drifts. The pipeline is short, but brittle.
+  - The path score remains much stronger than exact accuracy, which again suggests the harness often identifies useful intermediate structure while losing precision at final commitment.
+  - This design is better at broad exploration than at strict answer discipline. That makes it feel closer to QA-style candidate comparison than to deterministic multi-hop tool execution.
+
+  ## Module-level Diagnosis
+  ### Planning
+  - What Helps: The planning layer correctly recognizes that some tasks benefit from a mix of stable and adaptive reasoning. That is a sensible high-level strategy for uncertain tasks.
+  - What Hurts: Planning does not enforce enough structure on the downstream synthesizer. Once multiple candidates exist, the harness lacks a strong rule for preferring the most evidence-grounded answer over the most plausible-looking one.
+
+  ### Action
+  - What Helps: The mixed-team action design gives the harness useful breadth. It can surface alternative paths quickly and avoid single-path tunnel vision.
+  - What Hurts: The bundled action protocol is too coarse for ToolHop. When the final vote is wrong, there is no explicit repair loop that reopens the chain and checks the actual tool-grounded evidence step by step.
+
+  ### Memory
+  - What Helps: Skill-like memory is a good conceptual match for recurring transformation patterns, and it likely helps the harness produce structured candidate approaches quickly.
+  - What Hurts: Memory does not solve the main failure mode here, which is not a lack of candidate generation but weak arbitration between candidates. The harness remembers patterns more easily than it verifies them.
+file_order:
+- builder.py
+- Description.md
+- report.md
+- __init__.py
+- planning_module/prompts/toolcalling_agent.yaml
+- planning_module/provider.py
+- action_module/prompts/toolcalling_agent.yaml
+- action_module/provider.py
+- memory_module/provider.py
+source_files:
+  builder.py: |-
+    from __future__ import annotations
+
+    from dataclasses import replace
+    from pathlib import Path
+
+    from Agents.agents import ToolCallingAgent
+    from module_action.base_action import ActionContext
+    from .action_module.provider import ACTION_SYSTEM, get_provider
+    from .memory_module.provider import MEMORY_SYSTEM as DEFAULT_MEMORY_SYSTEM
+    from .planning_module.provider import PLANNING_SYSTEM, PlanningClass
+
+
+    HARNESS_NAME = "harness3"
+    DEFAULT_BENCH_TYPE = None
+    PAIRING_REASON = "matched_same_name"
+
+
+    def _bind_agent_reference(agent: ToolCallingAgent, tool: object | None) -> None:
+        if tool is not None and hasattr(tool, "agent"):
+            setattr(tool, "agent", agent)
+
+
+    def _ensure_owl_memory(agent: ToolCallingAgent) -> None:
+        if getattr(agent, "planning_system", None) != "owl":
+            return
+        if not hasattr(agent, "web_memory") or agent.web_memory is None:
+            agent.web_memory = []
+        if not hasattr(agent, "reasoning_memory") or agent.reasoning_memory is None:
+            agent.reasoning_memory = []
+
+
+    def prepare_context(context: ActionContext) -> ActionContext:
+        bench_type = context.bench_type or DEFAULT_BENCH_TYPE
+        prompts_type = context.prompts_type or PLANNING_SYSTEM
+        prepared_kwargs = dict(context.kwargs)
+        prepared_kwargs["planning_class"] = PlanningClass
+        return replace(
+            context,
+            planning_system=PLANNING_SYSTEM,
+            action_system=ACTION_SYSTEM,
+            prompts_type=prompts_type,
+            bench_type=bench_type,
+            project_root=Path(__file__).resolve().parent,
+            kwargs=prepared_kwargs,
+        )
+
+
+    def build_agent_from_context(context: ActionContext) -> ToolCallingAgent:
+        prepared_context = prepare_context(context)
+        action_provider = get_provider()
+        agent = action_provider.build(prepared_context)
+
+        setattr(agent, "planning_system", prepared_context.planning_system)
+        setattr(agent, "action_system", prepared_context.action_system)
+        setattr(agent, "harness_name", HARNESS_NAME)
+        setattr(
+            agent,
+            "harness_metadata",
+            {
+                "planning_system": PLANNING_SYSTEM,
+                "action_system": ACTION_SYSTEM,
+                "default_bench_type": DEFAULT_BENCH_TYPE,
+                "recommended_memory_system": DEFAULT_MEMORY_SYSTEM,
+                "pairing_reason": PAIRING_REASON,
+            },
+        )
+
+        if prepared_context.vector_tool is not None:
+            prepared_context.vector_tool.memory = agent.memory
+
+        _bind_agent_reference(agent, prepared_context.process_tool)
+        _bind_agent_reference(agent, prepared_context.end_process_tool)
+        _bind_agent_reference(agent, prepared_context.delete_memory_tool)
+        _bind_agent_reference(agent, prepared_context.executor_tool)
+        _bind_agent_reference(agent, prepared_context.refine_tool)
+
+        _ensure_owl_memory(agent)
+        return agent
+  Description.md: |-
+    Harness summary:
+    - Planning: augment the task, retrieve relevant memory, then route work deliberately.
+    - Execution: a small mixed team combines one structured worker with several adaptive workers.
+    - Memory: reusable skill-like procedures can be surfaced during execution.
+    - Default bench: caller-provided
+
+    Coordination pattern:
+    - Use one stable planner-executor for high-precision work.
+    - Run several adaptive workers for broader exploration.
+    - Compare the returned candidates before committing to an answer.
+
+    Runtime notes:
+    - Generated bundle: `harness3`
+    - The builder preserves the caller-provided `bench_type`.
+    - Benchmark-specific tools are loaded from `ActionContext` when available.
+    - The builder keeps the current `ActionContext` flow and only normalizes planning/action pairing.
+  report.md: |-
+    # harness3 Analysis
+
+    ## Structure
+    - Planning: augment the task, retrieve relevant memory, then route work deliberately.
+    - Action: a small mixed team combines one structured worker with several adaptive workers.
+    - Memory: reusable skill-like procedures can be surfaced during execution.
+
+    ## Aggregate Metrics
+    - Evaluated tasks: 80
+    - Exact accuracy: 41.2%
+    - Valid answer rate: 100.0%
+    - Average path score: 0.6132
+    - Average actions: 2.00
+    - Average tool calls: 2.00
+    - Prompt / completion / total tokens: 1690650 / 29588 / 1720238
+    - Average prompt / completion / total tokens: 21133.12 / 369.85 / 21502.97
+    - Total runtime: 121.63 min
+    - Average runtime per task: 91.22 sec
+
+    ## Overall Assessment
+    This harness is interesting because it gets meaningful value from structured candidate generation, but not enough value from the later synthesis layer. The cost profile is not low in wall-clock terms, yet the action depth stays very shallow because most of the work is hidden inside bundled ensemble steps. It is more suitable for tasks where multiple candidate answers can be generated and compared without strict serial dependency management. It is less suitable for ToolHop cases where one wrong vote or one bad synthesis choice can override a correct intermediate chain.
+
+    ## Failure Pattern Analysis
+    - The dominant weakness is synthesis failure rather than search failure. In several cases the harness appears to have access to a correct candidate, but the vote-and-synthesize stage still lands on the wrong final answer.
+    - Because the harness compresses a lot of reasoning into `ensemble_executor` and `vote_and_synthesize`, it becomes harder to recover once the aggregation layer drifts. The pipeline is short, but brittle.
+    - The path score remains much stronger than exact accuracy, which again suggests the harness often identifies useful intermediate structure while losing precision at final commitment.
+    - This design is better at broad exploration than at strict answer discipline. That makes it feel closer to QA-style candidate comparison than to deterministic multi-hop tool execution.
+
+    ## Module-level Diagnosis
+    ### Planning
+    - What Helps: The planning layer correctly recognizes that some tasks benefit from a mix of stable and adaptive reasoning. That is a sensible high-level strategy for uncertain tasks.
+    - What Hurts: Planning does not enforce enough structure on the downstream synthesizer. Once multiple candidates exist, the harness lacks a strong rule for preferring the most evidence-grounded answer over the most plausible-looking one.
+
+    ### Action
+    - What Helps: The mixed-team action design gives the harness useful breadth. It can surface alternative paths quickly and avoid single-path tunnel vision.
+    - What Hurts: The bundled action protocol is too coarse for ToolHop. When the final vote is wrong, there is no explicit repair loop that reopens the chain and checks the actual tool-grounded evidence step by step.
+
+    ### Memory
+    - What Helps: Skill-like memory is a good conceptual match for recurring transformation patterns, and it likely helps the harness produce structured candidate approaches quickly.
+    - What Hurts: Memory does not solve the main failure mode here, which is not a lack of candidate generation but weak arbitration between candidates. The harness remembers patterns more easily than it verifies them.
+  __init__.py: |-
+    from .builder import (
+        ACTION_SYSTEM,
+        DEFAULT_BENCH_TYPE,
+        DEFAULT_MEMORY_SYSTEM,
+        PAIRING_REASON,
+        PLANNING_SYSTEM,
+        HARNESS_NAME,
+        build_agent_from_context,
+    )
+
+    __all__ = [
+        "HARNESS_NAME",
+        "PLANNING_SYSTEM",
+        "ACTION_SYSTEM",
+        "DEFAULT_BENCH_TYPE",
+        "DEFAULT_MEMORY_SYSTEM",
+        "PAIRING_REASON",
+        "build_agent_from_context",
+    ]
+  planning_module/prompts/toolcalling_agent.yaml: |-
+    planning:
+      initial_plan: |-
+        ### Guarded Task Augmentation
+        [OUTPUT INSTRUCTION]: Strictly provide ONLY the following fields. NO other text.
+        - Task: [Provide ONLY the core question description from {{task}}. DO NOT include any answers or findings from History.]
+        - History: {{ retrieved_knowledge if retrieved_knowledge else "None" }}
+        - Complexity: [Determine: Simple/Complex]
+        - Experts: PE: 1, ReAct: [1 if Simple, 2 if Complex; never more than 2]
+        - Guard: [Name the most important tool-schema/repetition risk and the stop condition.]
+
+        [STRICT RULE]: The 'Task' field must only reflect the user's request, NOT the results found in 'History'.
+        [RECOVERY RULE]: after a failed observation, the next strategy must repair arguments, switch tools, or stop if evidence is sufficient.
+        [STOP]: YOUR OUTPUT MUST END HERE.
+      task_input: 'Task: {{task}}'
+  planning_module/provider.py: |-
+    import json
+    import textwrap
+    from typing import Any, Callable, Dict, List, Optional
+    from jinja2 import StrictUndefined, Template
+
+    from Agents.memory import ActionStep, AgentMemory, PlanningStep, SummaryStep
+    from Agents.models import ChatMessage, MessageRole
+    from Agents.monitoring import AgentLogger, LogLevel
+    from Agents.tools import Tool
+    from rich.rule import Rule
+    from rich.text import Text
+    from module_planning.base_planning import BasePlanning
+
+    def populate_template(template: str, variables: Dict[str, Any]) -> str:
+        compiled_template = Template(template, undefined=StrictUndefined)
+        try:
+            return compiled_template.render(**variables)
+        except Exception as e:
+            raise Exception(f"Error during jinja template rendering: {type(e).__name__}: {e}")
+
+
+    class PlanningProvider(BasePlanning):
+
+        def _get_role_planning_templates(self, role: Dict[str, str]) -> Dict[str, str]:
+            if role["name"] == "PE-Worker":
+                return {
+                    "initial_plan": (
+                        "### Roadmap (One-time)\n"
+                        "1. Identify the key task requirements and missing information.\n"
+                        "2. Use the available tools to gather, inspect, validate, or compute the needed evidence.\n"
+                        "3. Cross-check critical findings when necessary.\n"
+                        "4. Produce a definitive answer.\n"
+                        "[STRICT] Follow the roadmap. No re-planning."
+                    ),
+                    "task_input": "Task: {{task}}. Generate roadmap.",
+                }
+            if role["name"] == "ReAct-Worker":
+                return {
+                    "initial_plan": "### ReAct Strategy\nLoop: Think -> Act -> Observe.",
+                    "task_input": "Task: {{task}}. State strategy.",
+                }
+            return self.prompt_templates.get("planning", {})
+
+        def _get_role_summary_templates(self, role: Dict[str, str]) -> Dict[str, str]:
+            if role["name"] == "PE-Worker":
+                return {
+                    "update_pre_messages": "Reporting progress...",
+                    "update_post_messages": "Summarize status versus roadmap. No re-planning.",
+                }
+            if role["name"] == "ReAct-Worker":
+                return {
+                    "update_pre_messages": "Analyzing exploration...",
+                    "update_post_messages": "Summarize findings and adapt if blocked.",
+                }
+            return self.prompt_templates.get("summary", {})
+
+        def _get_role_info(self) -> Dict[str, str]:
+            explicit_role = getattr(self, "role_info", None)
+            if isinstance(explicit_role, dict) and explicit_role.get("name"):
+                return explicit_role
+
+            content = self.prompt_templates.get("system_prompt", "")
+            if "coordination agent" in content.lower():
+                return {"name": "Task Augmentation", "style": "bold yellow", "title_suffix": ""}
+            if "plan-and-execute expert" in content.lower():
+                return {"name": "PE-Worker", "style": "cyan", "title_suffix": " Roadmap"}
+            if "react expert" in content.lower():
+                return {"name": "ReAct-Worker", "style": "magenta", "title_suffix": " Strategy"}
+            return {"name": "Worker", "style": "blue", "title_suffix": " Planning"}
+
+        def topology_initialize(self, task: str) -> PlanningStep:
+            role = self._get_role_info()
+            planning_templates = self._get_role_planning_templates(role)
+            retrieved_knowledge = ""
+
+            # 1. Semantic Memory Retrieval (Supervisor only)
+            if role['name'] == "Task Augmentation":
+                vector_tool = self.tools.get("vector_similarity_retrieve")
+                if vector_tool:
+                    try:
+                        # Search through current memory steps (which include historical Knowledge Units)
+                        retrieved_knowledge = vector_tool.forward(task)
+                        if "No historical action steps" in retrieved_knowledge or "Error" in retrieved_knowledge:
+                            retrieved_knowledge = ""
+                        else:
+                            # Token Optimization: Strictly truncate historical context
+                            if len(retrieved_knowledge) > 500:
+                                retrieved_knowledge = retrieved_knowledge[:500] + "... (truncated)"
+
+                            # Format history to be clearly distinct from current task
+                            retrieved_knowledge = f"\n[PAST EXPERIENCE (For Reference Only)]:\n{retrieved_knowledge}"
+                            self.logger.log(Text("\n[Semantic Memory] Relevant historical context retrieved.", style="italic cyan"), level=LogLevel.INFO)
+                    except Exception:
+                        retrieved_knowledge = ""
+
+            input_messages = [
+                {
+                    "role": MessageRole.SYSTEM,
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": populate_template(
+                                planning_templates["initial_plan"],
+                                variables={"tools": self.tools, "retrieved_knowledge": retrieved_knowledge, "task": task},
+                            ),
+                        }
+                    ],
+                },
+            ]
+            memory_guidance = self.append_memory_guidance(input_messages)
+            task_messages = [{
+                "role": MessageRole.USER,
+                "content": [{"type": "text", "text": populate_template(planning_templates["task_input"], variables={"task": task})}],
+            }]
+
+            chat_message_plan: ChatMessage = self.model(input_messages + task_messages)
+            plans_answer = chat_message_plan.content
+            think_content = getattr(chat_message_plan, "reasoning_content", "")
+
+            title = f"{role['name']}{role['title_suffix']}"
+
+            self.logger.log(
+                Rule(title, style=role['style']),
+                Text(f"\n{plans_answer}\n"),
+                level=LogLevel.INFO,
+            )
+
+            planning_step = PlanningStep(
+                model_input_messages=input_messages,
+                plan=plans_answer,
+                plan_think="",
+                plan_reasoning=think_content,
+                memory_guidance=memory_guidance,
+            )
+            self.memory.steps.append(planning_step)
+            return planning_step
+
+        def adaptation(
+            self,
+            task: str,
+            step: int,
+            write_memory_to_messages: Callable[[Optional[List[ActionStep]], Optional[bool]], List[Dict[str, str]]]
+        ) -> SummaryStep:
+            role = self._get_role_info()
+            if role['name'] == "Task Augmentation":
+                return SummaryStep(model_input_messages=[], summary="Monitoring ensemble execution...", summary_reasoning="")
+            summary_templates = self._get_role_summary_templates(role)
+
+            # Worker Summary Policy: STRICTLY Progress-only, NO re-planning.
+            memory_messages = write_memory_to_messages(None, False)[1:]
+            summary_policy = "\n[SUMMARY POLICY]: Report progress ONLY. DO NOT change the initial roadmap or propose new plans."
+
+            input_messages = [
+                {"role": MessageRole.SYSTEM, "content": [{"type": "text", "text": summary_templates["update_pre_messages"] + summary_policy}]},
+                *memory_messages,
+                {"role": MessageRole.USER, "content": [{"type": "text", "text": summary_templates["update_post_messages"]}]}
+            ]
+
+            chat_message_summary: ChatMessage = self.model(input_messages)
+            summary_answer = chat_message_summary.content
+            summary_cot = getattr(chat_message_summary, "reasoning_content", "")
+
+            self.logger.log(
+                Rule(f"{role['name']} Execution Summary", style="blue"),
+                Text(f"\n{summary_answer}\n"),
+                level=LogLevel.INFO,
+            )
+
+            summary_step = SummaryStep(input_messages, summary_answer, summary_cot)
+            self.memory.steps.append(summary_step)
+            return summary_step
+
+    PLANNING_SYSTEM = 'guarded_joy_agent'
+    PLANNING_MODULE = 'guarded_joy_agent'
+    PlanningClass = PlanningProvider
+
+    __all__ = ['PLANNING_SYSTEM', 'PLANNING_MODULE', 'PlanningProvider', 'PlanningClass']
+  action_module/prompts/toolcalling_agent.yaml: |-
+    system_prompt: |-
+      You are a guarded JOY coordination agent. Solve the task by:
+      1. CALL `ensemble_executor` with the original task.
+      2. CALL `vote_and_synthesize` once experts report back.
+      3. CALL `final_answer` with the final verdict.
+
+      [RULES]
+      - Use a JSON list of tool calls: [{"name": "...", "arguments": {...}}]
+      - Use key "name" for the tool name and "arguments" for parameters.
+      - Do NOT call `vector_similarity_retrieve` directly; it is handled automatically when needed.
+      - Do not solve the task directly yourself; orchestrate the expert set.
+      - When calling `vote_and_synthesize`, the argument key must be `candidates`, not `answers`.
+      - Pass the raw JSON output of `ensemble_executor` directly as `candidates`.
+      - Do not repeat a failed orchestration call with the same arguments unless a new observation explains why it should now work.
+      - If an expert report shows schema mismatch or invalid arguments, direct the next attempt to repair the arguments rather than repeating the same mistake.
+      - Keep orchestration small: one ensemble round, one synthesis round, then final when possible.
+      - If the ensemble reports repeated failed tool calls, do not rerun the same pattern; synthesize the best supported partial answer or issue a repaired one-shot retry.
+
+      ### Tools
+      {%- for tool in tools.values() %}
+      - {{ tool.name }}: {{ tool.description }}
+      {%- endfor %}
+    step:
+      pre_messages: |-
+        [DIRECTIVE]
+        1. REVIEW HISTORY: Do not repeat failed orchestration calls.
+        2. PHASE ENFORCEMENT:
+           - If `ensemble_executor` has not been called, call it now.
+           - If expert results are available, call `vote_and_synthesize(task={{task|tojson}}, candidates=<ensemble_executor JSON output>)`.
+           - If the verdict is ready, call `final_answer`.
+        3. ARGUMENT DISCIPLINE:
+           - Never call `vote_and_synthesize` with `answers=...`; always use `candidates=...`.
+        4. ADAPTIVE RECOVERY:
+           - If experts made invalid tool calls or repeated failures, your next orchestration step must push them to change arguments, tool choice, or strategy.
+           - Never relaunch the same failing orchestration pattern without a concrete fix.
+
+        [FORMAT]
+        Return a JSON list of tool calls only.
+
+        Tool Definitions:
+        {{tool_functions_json}}
+
+        Task: {{task}}
+    pe_worker:
+      system_prompt: |-
+        You are a guarded Plan-and-Execute Expert.
+        1. Build a roadmap once.
+        2. Execute the roadmap using the currently available tools.
+        3. Return a grounded final answer.
+
+        [CRITICAL]
+        - Plan only once and stay aligned to the roadmap.
+        - Use only currently available tools. Do not invent unavailable search tools.
+        - Follow each listed tool schema exactly; use the provided argument names and types.
+        - Never substitute alternative argument names or call unavailable tools.
+        - If a tool call fails because of invalid arguments or schema mismatch, repair the arguments on the next attempt instead of repeating the same failed call.
+        - Never repeat an identical failed call unless the observation explicitly justifies it.
+        - If a guarded tool blocks a call, immediately change strategy or finalize with supported evidence.
+        - Stop early when observations are enough; do not continue just to fill the roadmap.
+        - Base your final answer only on observations; do not replace a supported observed result with a new guess.
+        - Output only one JSON object:
+          {"think": "...", "tools": [{"name": "...", "arguments": {...}}]}
+
+        ### Tools
+        {%- for tool in tools.values() %}
+        - {{ tool.name }}: {{ tool.description }}
+        {%- endfor %}
+      step:
+        pre_messages: |-
+          1. REVIEW HISTORY: Look at previous observations and avoid repeating failed actions.
+          2. ROADMAP ADHERENCE: Follow the roadmap, but adjust tool arguments or the next concrete tool choice if current evidence is insufficient.
+          3. USE ONLY AVAILABLE TOOLS.
+          4. Read the tool schemas carefully; every argument object must match the listed keys exactly.
+          5. If progress is weak, change the tool choice, arguments, or strategy; do not retry blindly.
+
+          Task: {{task}}
+          Return JSON only.
+      final_answer:
+        pre_messages: Finalizing Plan-Execute answer.
+        post_messages: 'Return JSON: {"think": "...", "answer": "..."}'
+    react_worker:
+      system_prompt: |-
+        You are a guarded ReAct Expert.
+        Loop: Thought -> Action -> Observation.
+
+        [CRITICAL]
+        - Use only the currently available tools.
+        - Adapt quickly when a tool call does not make progress.
+        - Follow each listed tool schema exactly; use the provided argument names and types.
+        - Never substitute alternative argument names or call unavailable tools.
+        - If a tool call fails because of invalid arguments or schema mismatch, repair the arguments on the next attempt instead of repeating the same failed call.
+        - Never repeat an identical failed call unless the observation explicitly justifies it.
+        - If the same strategy fails once, the next step must use a different valid tool, different arguments, or final_answer.
+        - Stop early when the answer is supported; avoid long exploratory loops.
+        - Base your final answer only on observations; do not replace a supported observed result with a new guess.
+        - Output only one JSON object:
+          {"think": "...", "tools": [{"name": "...", "arguments": {...}}]}
+
+        ### Tools
+        {%- for tool in tools.values() %}
+        - {{ tool.name }}: {{ tool.description }}
+        {%- endfor %}
+      step:
+        pre_messages: |-
+          [DIRECTIVE]
+          1. REVIEW HISTORY: Do not repeat failed tool calls or identical arguments.
+          2. ADAPTATION: If progress is weak, change the tool choice, arguments, or strategy.
+          3. USE ONLY AVAILABLE TOOLS.
+          4. Read the tool schemas carefully; every argument object must match the listed keys exactly.
+          5. If a tool failed because of invalid arguments, your next attempt must correct the arguments or switch tools.
+          6. If a guard blocks a repeated failed call, do not retry that call.
+
+          Task: {{task}}
+          Return JSON only.
+      final_answer:
+        pre_messages: Finalizing ReAct answer.
+        post_messages: 'Return JSON: {"think": "...", "answer": "..."}'
+    final_answer:
+      pre_messages: Ensemble arbitration complete.
+      post_messages: 'Final answer for: {{task}}. Return JSON {think, answer}.'
+    critic:
+      prompt: |-
+        Judge expert answers for: {{task}}
+
+        ### Candidates
+        {%- for cand in candidates %}
+        - EXPERT: {{ cand.agent_name }}
+        - ANSWER: {{ cand.answer }}
+        - TRACE: {{ cand.message_object.intermediate_evidence | tojson }}
+        {%- endfor %}
+
+        ### Instructions
+        1. Check compliance, evidence, and logic.
+        2. If a majority answer is supported by evidence, prioritize it.
+        3. Return JSON: {"think": "...", "verdict_answer": "...", "confidence": 0.0-1.0}
+        [CRITICAL] A definitive answer is required.
+    distiller:
+      prompt: |-
+        ### Distill Knowledge Unit
+        Problem: {{task}}
+        Trace: {{trajectory}}
+        Answer: {{answer}}
+        Format:
+        [Problem]: ...
+        [Strategy]: ...
+        [Findings]: ...
+        [Conclusion]: ...
+        (Return block only)
+  action_module/provider.py: |-
+    from __future__ import annotations
+
+    from typing import Any
+
+    from Agents.agents import ToolCallingAgent
+    from Agents.tools import EnsembleTool, VoteTool
+
+    from _harness_guards import guard_task_tools
+    from module_action.base_action import ActionContext, BaseActionProvider
+
+
+    class ActionProvider(BaseActionProvider):
+        PROMPTS_TYPE = "guarded_joy_agent"
+        REACT_WORKERS = 2
+        DEFAULT_WORKER_MAX_STEPS = 7
+
+        def _worker_max_steps(self, context: ActionContext) -> int:
+            remaining_budget = max(1, context.max_steps - 3)
+            return max(4, min(self.DEFAULT_WORKER_MAX_STEPS, remaining_budget))
+
+        def build_affordance(
+            self,
+            bench_type: str | None,
+            context: ActionContext,
+        ) -> list[Any]:
+            return self.get_primary_task_tools(context, include_reasoning=True)
+
+        def build_specification(
+            self,
+            context: ActionContext,
+            tools: list[Any],
+        ) -> None:
+            self.prompts_type = self.PROMPTS_TYPE
+            self.prompt_templates = self.load_prompt_templates(context, self.prompts_type)
+            self.organization_planning_system = self.PROMPTS_TYPE
+            guarded_tools = guard_task_tools(
+                tools,
+                policy_label="guarded_joy_worker",
+                max_real_tool_calls=self._worker_max_steps(context),
+            )
+            self.coordinator_role = {
+                "name": "Task Augmentation",
+                "style": "bold yellow",
+                "title_suffix": "",
+                "responsibility": "Augment the task, retrieve procedural memory, orchestrate a small guarded ensemble, and stop early.",
+            }
+            self.pe_role = {
+                "name": "PE-Worker",
+                "style": "cyan",
+                "title_suffix": " Roadmap",
+                "responsibility": "Plan once, execute along a stable roadmap, and avoid repeated failed tool calls.",
+            }
+            self.react_role = {
+                "name": "ReAct-Worker",
+                "style": "magenta",
+                "title_suffix": " Strategy",
+                "responsibility": "Explore briefly, then change strategy after any failed observation.",
+            }
+            planning_class = context.kwargs.get("planning_class")
+
+            self.pe_worker = self.create_subagent(
+                context,
+                tools=guarded_tools,
+                planning_system=self.organization_planning_system,
+                planning_class=planning_class,
+                prompt_templates=self.prompt_templates["pe_worker"],
+                name="pe_expert",
+                max_steps=self._worker_max_steps(context),
+                summary_interval=context.max_steps + 1,
+                description=(
+                    "Expert at structured logic and high-reliability reports. "
+                    "Follows a guarded Plan-Execute paradigm."
+                ),
+            )
+            if getattr(self.pe_worker, "planning", None) is not None:
+                self.pe_worker.planning.role_info = self.pe_role
+
+            self.react_workers = [
+                self.create_subagent(
+                    context,
+                    tools=guarded_tools,
+                    planning_system=self.organization_planning_system,
+                    planning_class=planning_class,
+                    prompt_templates=self.prompt_templates["react_worker"],
+                    name=f"react_expert_{i}",
+                    max_steps=self._worker_max_steps(context),
+                    summary_interval=context.max_steps + 1,
+                    description=(
+                        "Fast reactive expert for exploratory search. "
+                        "Follows guarded ReAct with early stop."
+                    ),
+                )
+                for i in range(1, self.REACT_WORKERS + 1)
+            ]
+            for worker in self.react_workers:
+                if getattr(worker, "planning", None) is not None:
+                    worker.planning.role_info = self.react_role
+
+        def build_organization(
+            self,
+            context: ActionContext,
+            tools: list[Any],
+        ):
+            ensemble_tool = EnsembleTool(
+                pe_worker=self.pe_worker,
+                react_workers=self.react_workers,
+            )
+            vote_tool = VoteTool(model=context.model)
+            root_tools = self.normalize_tools([ensemble_tool, vote_tool, context.vector_tool])
+            agent = self.create_agent(
+                context,
+                tools=root_tools,
+                prompt_templates=self.prompt_templates,
+                prompts_type=self.prompts_type,
+                planning_system=self.organization_planning_system,
+            )
+            if getattr(agent, "planning", None) is not None:
+                agent.planning.role_info = self.coordinator_role
+            agent.managed_agents = {
+                worker.name: worker for worker in [self.pe_worker] + self.react_workers
+            }
+            ensemble_tool.agent = agent
+            vote_tool.agent = agent
+            setattr(
+                agent,
+                "harness_policy",
+                {
+                    "mode": "guarded_joy_agent",
+                    "pe_workers": 1,
+                    "react_workers": len(self.react_workers),
+                    "worker_max_steps": self._worker_max_steps(context),
+                    "guarded_worker_tools": True,
+                },
+            )
+            return agent
+
+    ACTION_SYSTEM = 'guarded_joy_agent'
+    ACTION_MODULE = 'guarded_joy_agent'
+
+    def get_provider():
+        return ActionProvider()
+
+    __all__ = ['ACTION_SYSTEM', 'ACTION_MODULE', 'ActionProvider', 'get_provider']
+  memory_module/provider.py: |-
+    """
+    SkillWeaver provider for unified memory system
+    """
+
+    import os
+    import importlib.util
+    import uuid
+    import re
+    import ast
+    import inspect
+    import logging
+    from datetime import datetime
+    from typing import List, Optional, Dict, Any, Callable
+
+    from module_memory.base_memory import BaseMemoryProvider, atomic_write_text, file_lock
+    from module_memory.memory_types import (
+        MemoryRequest,
+        MemoryResponse,
+        TrajectoryData,
+        MemoryType,
+        MemoryItem,
+        MemoryItemType,
+        MemoryStatus
+    )
+
+    # Import unified tool wrapper
+    from storage.tools.tool_wrapper import ToolWrapper
+
+
+    class MemoryProvider(BaseMemoryProvider):
+        """
+        SkillWeaver memory provider that manages generated skills
+        """
+
+        def __init__(self, config: Optional[dict] = None):
+            super().__init__(MemoryType.SKILLWEAVER, config)
+
+            # Configuration
+            self.skills_file_path = self.config.get(
+                "skills_file_path",
+                "./storage/skillweaver/skillweaver_generated_skills.py",
+            )
+            # Optional skills directory: load all *.py files if provided
+            self.skills_dir = self.config.get("skills_dir", "./storage/skillweaver")
+
+            # Optional model used directly for LLM-driven code generation
+            self.model = self.config.get("model")
+
+            # Skills registry
+            self.skills_registry: Dict[str, Callable] = {}
+            self.skills_metadata: Dict[str, Dict[str, Any]] = {}
+
+            # Logger
+            self.logger = logging.getLogger(__name__)
+            if not self.logger.handlers:
+                handler = logging.StreamHandler()
+                formatter = logging.Formatter('[%(asctime)s] [SkillWeaver] [%(levelname)s] %(message)s')
+                handler.setFormatter(formatter)
+                self.logger.addHandler(handler)
+                self.logger.setLevel(logging.INFO)
+
+            # Initialize unified tool wrapper
+            self.tool_wrapper = ToolWrapper(model=self.model, logger=self.logger)
+
+        def initialize(self) -> bool:
+            """Initialize SkillWeaver provider by loading existing skills"""
+            try:
+                # Ensure storage directories exist
+                if self.skills_dir:
+                    os.makedirs(self.skills_dir, exist_ok=True)
+                parent_dir = os.path.dirname(self.skills_file_path)
+                if parent_dir:
+                    os.makedirs(parent_dir, exist_ok=True)
+
+                # Prefer loading from directory when available, else fallback to single file
+                if os.path.isdir(self.skills_dir):
+                    self._load_skills_from_dir(self.skills_dir)
+                elif os.path.exists(self.skills_file_path):
+                    self._load_skills_from_file(self.skills_file_path)
+                # If neither exists, still return True to allow future ingestion to create files
+                return True
+            except Exception as e:
+                print(f"Error initializing SkillWeaver provider: {e}")
+                return False
+
+        def _load_skills_from_file(self, file_path: str):
+            """Load skills from a single generated skills file"""
+            try:
+                spec = importlib.util.spec_from_file_location("skillweaver_skills", file_path)
+                module = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(module)
+                self._populate_registry_from_module(module)
+            except Exception as e:
+                print(f"Error loading skills from file {file_path}: {e}")
+
+        def _load_skills_from_dir(self, dir_path: str):
+            """Load skills from all .py files in a directory"""
+            try:
+                for filename in os.listdir(dir_path):
+                    if not filename.endswith(".py") or filename.startswith("__"):
+                        continue
+                    file_path = os.path.join(dir_path, filename)
+                    try:
+                        spec = importlib.util.spec_from_file_location(filename[:-3], file_path)
+                        module = importlib.util.module_from_spec(spec)
+                        spec.loader.exec_module(module)
+                        self._populate_registry_from_module(module)
+                    except Exception as inner_e:
+                        print(f"Error loading skills from {file_path}: {inner_e}")
+            except Exception as e:
+                print(f"Error scanning skills directory {dir_path}: {e}")
+
+        def _populate_registry_from_module(self, module):
+            """Extract public callables from a module as skills and capture their metadata"""
+            for name in dir(module):
+                if name.startswith("_"):
+                    continue
+                obj = getattr(module, name)
+                if callable(obj):
+                    self.skills_registry[name] = obj
+                    docstring = getattr(obj, "__doc__", "") or ""
+                    self.skills_metadata[name] = {
+                        "description": (docstring.split("\n")[0] if docstring else name),
+                        "full_docstring": docstring,
+                        "module": getattr(module, "__name__", "skillweaver_skills"),
+                    }
+
+        def _reload_skills(self):
+            """Reload skills after ingestion"""
+            self.skills_registry.clear()
+            self.skills_metadata.clear()
+            self.tool_wrapper.clear_cache()  # Clear tool wrapper cache when reloading
+            if os.path.isdir(self.skills_dir):
+                self._load_skills_from_dir(self.skills_dir)
+            elif os.path.exists(self.skills_file_path):
+                self._load_skills_from_file(self.skills_file_path)
+
+        def provide_memory(self, request: MemoryRequest) -> MemoryResponse:
+            """
+            Provide memory by searching for relevant skills
+            """
+            try:
+                if request.status != MemoryStatus.BEGIN:
+                    return MemoryResponse(
+                        memories=[],
+                        memory_type=self.memory_type,
+                        total_count=0,
+                        request_id=str(uuid.uuid4()),
+                    )
+
+                # Simple keyword matching for skills
+                relevant_skills = []
+                query_lower = request.query.lower()
+
+                for skill_name, metadata in self.skills_metadata.items():
+                    description = metadata.get("description", "").lower()
+                    docstring = metadata.get("full_docstring", "").lower()
+
+                    # Score based on keyword matches
+                    score = 0.0
+                    for word in query_lower.split():
+                        if word in skill_name.lower():
+                            score += 2.0
+                        elif word in description:
+                            score += 1.5
+                        elif word in docstring:
+                            score += 1.0
+
+                    if score > 0:
+                        relevant_skills.append({
+                            "skill_name": skill_name,
+                            "metadata": metadata,
+                            "score": score,
+                        })
+
+                # Sort by score and take top results
+                relevant_skills.sort(key=lambda x: x["score"], reverse=True)
+                top_skills = relevant_skills[:3]
+
+                # Convert to MemoryItem format
+                memories: List[MemoryItem] = []
+                for skill_info in top_skills:
+                    skill_name = skill_info["skill_name"]
+                    function_obj = self.skills_registry.get(skill_name)
+                    if not function_obj:
+                        continue
+                    content = self._format_skill_content(skill_name, skill_info["metadata"], request.status)
+
+                    # Wrap function as a runtime tool
+                    wrapped_tool = self._wrap_tool(function_obj, skill_name)
+
+                    memory_item = MemoryItem(
+                        id=f"skill_{skill_name}",
+                        content=content,
+                        metadata={
+                            "skill_name": skill_name,
+                            "description": skill_info["metadata"].get("description", ""),
+                            "score": skill_info["score"],
+                            "callable": function_obj,  # Keep original function
+                            "wrapped_tool": wrapped_tool,  # Add wrapped tool
+                            "status": request.status.value,
+                        },
+                        score=skill_info["score"],
+                        type=MemoryItemType.API,
+                    )
+                    memories.append(memory_item)
+
+                return MemoryResponse(
+                    memories=memories,
+                    memory_type=self.memory_type,
+                    total_count=len(memories),
+                    request_id=str(uuid.uuid4()),
+                )
+            except Exception as e:
+                print(f"Error providing SkillWeaver memory: {e}")
+                return MemoryResponse(memories=[], memory_type=self.memory_type, total_count=0)
+
+        def _wrap_tool(self, tool_func: Callable, tool_name: str) -> Optional[Any]:
+            """Wrap Python function as Tool object using unified ToolWrapper"""
+            return self.tool_wrapper.wrap_function(tool_func, tool_name)
+
+        def _format_skill_content(self, skill_name: str, metadata: Dict, status: MemoryStatus) -> str:
+            """Format skill content for API-type memory - content will be handled by main file"""
+            try:
+                if status == MemoryStatus.BEGIN:
+                    return f"SkillWeaver Available skill: {skill_name}\nDescription: {metadata.get('description', '')}"
+                elif status == MemoryStatus.IN:
+                    return None  # SkillWeaver only provides memory in BEGIN phase
+                return f"SkillWeaver Skill: {skill_name}: {metadata.get('description', '')}"
+            except Exception as e:
+                print(f"Error formatting skill content: {e}")
+                return f"SkillWeaver Skill: {skill_name}"
+
+        def _extract_function_from_code(self, code: str) -> Optional[Dict[str, Any]]:
+            """Extract the first function from Python code using AST and return its name and the code block."""
+            try:
+                tree = ast.parse(code)
+                func_defs = [node for node in ast.walk(tree) if isinstance(node, ast.FunctionDef)]
+                if not func_defs:
+                    return None
+                func = func_defs[0]
+                func_name = func.name
+                # Best-effort: return the full code as provided (we won't slice exact function body)
+                return {"name": func_name, "code": code}
+            except Exception:
+                return None
+
+        def _is_dangerous_code(self, code: str) -> bool:
+            """Basic static checks to avoid dangerous operations in generated skills."""
+            try:
+                tree = ast.parse(code)
+                for node in ast.walk(tree):
+                    if isinstance(node, ast.Call):
+                        # Block eval/exec/compile and raw open
+                        if isinstance(node.func, ast.Name) and node.func.id in {"exec", "eval", "compile", "__import__"}:
+                            return True
+                        if isinstance(node.func, ast.Name) and node.func.id == "open":
+                            return True
+                    if isinstance(node, ast.Attribute):
+                        if node.attr in {"system", "popen", "spawn", "remove", "rmdir"}:
+                            return True
+                return False
+            except Exception:
+                return True
+
+        def _append_skill_to_file(self, function_name: str, code: str) -> bool:
+            """Append skill code to the aggregator file, creating header if needed and avoiding duplicates."""
+            try:
+                os.makedirs(os.path.dirname(self.skills_file_path) or ".", exist_ok=True)
+                with file_lock(self.skills_file_path):
+                    existing = ""
+                    if os.path.exists(self.skills_file_path):
+                        with open(self.skills_file_path, "r", encoding="utf-8") as f:
+                            existing = f.read()
+                    else:
+                        existing = (
+                            '"""\nSkillWeaver Generated Skills\nAuto-generated and continuously updated by UnifiedMemory SkillWeaverProvider.\nThis file contains dynamically generated skills.\n"""\n\n'
+                        )
+                    if f"def {function_name}(" in existing:
+                        return True
+                    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                    new_content = existing + f"\n# Generated on {timestamp}\n{code}\n\n"
+                    atomic_write_text(self.skills_file_path, new_content)
+                return True
+            except Exception as e:
+                print(f"Error saving generated skill: {e}")
+                return False
+
+        def _generate_skill_from_trajectory(self, trajectory_data: TrajectoryData) -> Optional[Dict[str, str]]:
+            """Use the injected model to generate a new skill function based on the trajectory."""
+            if self.model is None:
+                return None
+            try:
+                # Build prompt (aligned with project conventions)
+                trajectory_json = None
+                try:
+                    import json as _json
+                    trajectory_json = _json.dumps(trajectory_data.trajectory, indent=2, ensure_ascii=False)
+                except Exception:
+                    trajectory_json = str(trajectory_data.trajectory)
+                prompt = f"""You are an expert Python programmer specializing in creating reusable, generic functions. Your task is to analyze a successful task execution and extract a GENERAL, PARAMETERIZED skill that can be reused for similar problems.
+
+    CRITICAL REQUIREMENTS:
+    - Create a GENERIC function that accepts parameters, NOT a function that returns hardcoded values
+    - The function must be REUSABLE for different inputs of the same type of problem
+    - Focus on the METHODOLOGY and APPROACH, not the specific data from this execution
+    - Make the function PARAMETERIZED so it can handle various inputs
+
+    Original Task:
+    {trajectory_data.query}
+
+    Agent's Successful Trajectory:
+    ```json
+    {trajectory_json}
+    ```
+
+    ANALYSIS INSTRUCTIONS:
+    1. Identify the CORE METHODOLOGY or ALGORITHM used in the successful execution
+    2. Abstract away specific values, URLs, names, or data points from this particular task
+    3. Focus on the GENERAL PATTERN that could apply to similar problems
+    4. Create a function that takes relevant parameters as input
+
+    FUNCTION REQUIREMENTS:
+    1. Write a single, self-contained Python function that is GENERIC and PARAMETERIZED
+    2. Use descriptive parameter names and include type hints
+    3. Include comprehensive docstring with Args and Returns sections
+    4. Add proper error handling and input validation
+    5. The function should work for DIFFERENT inputs of the same problem type
+    6. DO NOT hardcode specific values from this execution - make them parameters instead
+
+    EXAMPLE OF GOOD vs BAD:
+    ❌ BAD: def get_population(): return 1234567  # Returns hardcoded value
+    ✅ GOOD: def get_population_from_source(source_url: str, location: str) -> int  # Generic, parameterized
+
+    Output ONLY the Python code for this generic function inside a single markdown code block:"""
+                messages = [{"role": "user", "content": prompt}]
+                response = self.model(messages)
+                content = getattr(response, "content", str(response))
+                # Extract python code block
+                m = re.search(r"```python\n(.*?)```", content, re.DOTALL)
+                code = m.group(1).strip() if m else content.strip()
+                # Validate
+                if self._is_dangerous_code(code):
+                    return None
+                func_info = self._extract_function_from_code(code)
+                if not func_info:
+                    return None
+                return {"name": func_info["name"], "code": code}
+            except Exception:
+                return None
+
+        def take_in_memory(self, trajectory_data: TrajectoryData) -> tuple[bool, str]:
+            """
+            Ingest new memory by generating new skills from trajectory using the injected model.
+            Only extracts skills from trajectories with correct answers to avoid learning bad patterns.
+            """
+            try:
+                # Check if the trajectory has correct answer - only learn from successful cases
+                metadata = trajectory_data.metadata or {}
+                is_correct = metadata.get("is_correct", False)
+                task_success = bool(metadata.get("task_success", metadata.get("is_correct", False)))
+
+                if not is_correct:
+                    msg = f"SkillWeaverProvider: skipping skill extraction - answer is incorrect (is_correct={is_correct})"
+                    print(msg)
+                    return True, msg  # Return True to not block the pipeline, but don't extract skills
+
+                if not task_success:
+                    msg = f"SkillWeaverProvider: skipping skill extraction - task execution failed (task_success={task_success})"
+                    print(msg)
+                    return True, msg  # Return True to not block the pipeline, but don't extract skills
+
+                print(f"SkillWeaverProvider: extracting skill from correct trajectory (is_correct={is_correct}, task_success={task_success})")
+
+                skill = self._generate_skill_from_trajectory(trajectory_data)
+                if not skill:
+                    # No model or failed generation; succeed silently to avoid blocking
+                    msg = "SkillWeaverProvider: generation skipped (no model or validation failed)"
+                    print(msg)
+                    return True, msg
+
+                saved = self._append_skill_to_file(skill["name"], skill["code"])
+                if saved:
+                    self._reload_skills()
+                    msg = f"SkillWeaverProvider: successfully extracted and saved skill '{skill['name']}' from correct trajectory"
+                    print(msg)
+                    absorbed_memory = {
+                        "skill_name": skill['name'],
+                        "description": skill.get('description', ''),
+                        "code": skill['code']
+                    }
+                    return saved, f"Generated skill: {absorbed_memory}"
+                else:
+                    return saved, f"Failed to save skill: {skill['name']}"
+            except Exception as e:
+                error_msg = f"Error taking in SkillWeaver memory: {e}"
+                print(error_msg)
+                return False, error_msg
+
+
+    from module_memory.providers.memp_memory_provider import MempMemoryProvider
+
+
+    SkillWeaverProvider = MemoryProvider
+    MemoryProvider = MempMemoryProvider
+    MEMORY_SYSTEM = MemoryType.MEMP.value
+
+    __all__ = ["MEMORY_SYSTEM", "MemoryProvider", "SkillWeaverProvider", "MempMemoryProvider"]
+prompt_ready_example: |-
+  ## Example Harness: harness3
+
+  ### Harness Identity
+  - Planning system: guarded_joy_agent
+  - Action system: guarded_joy_agent
+  - Default memory system: memp
+  - Default bench type: None
+  - Pairing reason: matched_same_name
+
+  ### Description
+  Harness summary:
+  - Planning: augment the task, retrieve relevant memory, then route work deliberately.
+  - Execution: a small mixed team combines one structured worker with several adaptive workers.
+  - Memory: reusable skill-like procedures can be surfaced during execution.
+  - Default bench: caller-provided
+
+  Coordination pattern:
+  - Use one stable planner-executor for high-precision work.
+  - Run several adaptive workers for broader exploration.
+  - Compare the returned candidates before committing to an answer.
+
+  Runtime notes:
+  - Generated bundle: `harness3`
+  - The builder preserves the caller-provided `bench_type`.
+  - Benchmark-specific tools are loaded from `ActionContext` when available.
+  - The builder keeps the current `ActionContext` flow and only normalizes planning/action pairing.
+
+  ### Performance Snapshot
+  - Evaluated tasks: 80
+  - Exact accuracy: 41.25%
+  - Valid answer rate: 100.00%
+  - Average path score: 0.6132
+  - Average actions: 2.0
+  - Average tool calls: 2.0
+  - Average total tokens: 21502.97
+  - Average runtime (sec): 91.22
+  - Source result file: output/toolhop_round1_harness3/toolhop_flash_searcher_flash_searcher_skillweaver_local_qwen3-aevolve_closed_results.jsonl
+
+  ### Performance Report
+  # harness3 Analysis
+
+  ## Structure
+  - Planning: augment the task, retrieve relevant memory, then route work deliberately.
+  - Action: a small mixed team combines one structured worker with several adaptive workers.
+  - Memory: reusable skill-like procedures can be surfaced during execution.
+
+  ## Aggregate Metrics
+  - Evaluated tasks: 80
+  - Exact accuracy: 41.2%
+  - Valid answer rate: 100.0%
+  - Average path score: 0.6132
+  - Average actions: 2.00
+  - Average tool calls: 2.00
+  - Prompt / completion / total tokens: 1690650 / 29588 / 1720238
+  - Average prompt / completion / total tokens: 21133.12 / 369.85 / 21502.97
+  - Total runtime: 121.63 min
+  - Average runtime per task: 91.22 sec
+
+  ## Overall Assessment
+  This harness is interesting because it gets meaningful value from structured candidate generation, but not enough value from the later synthesis layer. The cost profile is not low in wall-clock terms, yet the action depth stays very shallow because most of the work is hidden inside bundled ensemble steps. It is more suitable for tasks where multiple candidate answers can be generated and compared without strict serial dependency management. It is less suitable for ToolHop cases where one wrong vote or one bad synthesis choice can override a correct intermediate chain.
+
+  ## Failure Pattern Analysis
+  - The dominant weakness is synthesis failure rather than search failure. In several cases the harness appears to have access to a correct candidate, but the vote-and-synthesize stage still lands on the wrong final answer.
+  - Because the harness compresses a lot of reasoning into `ensemble_executor` and `vote_and_synthesize`, it becomes harder to recover once the aggregation layer drifts. The pipeline is short, but brittle.
+  - The path score remains much stronger than exact accuracy, which again suggests the harness often identifies useful intermediate structure while losing precision at final commitment.
+  - This design is better at broad exploration than at strict answer discipline. That makes it feel closer to QA-style candidate comparison than to deterministic multi-hop tool execution.
+
+  ## Module-level Diagnosis
+  ### Planning
+  - What Helps: The planning layer correctly recognizes that some tasks benefit from a mix of stable and adaptive reasoning. That is a sensible high-level strategy for uncertain tasks.
+  - What Hurts: Planning does not enforce enough structure on the downstream synthesizer. Once multiple candidates exist, the harness lacks a strong rule for preferring the most evidence-grounded answer over the most plausible-looking one.
+
+  ### Action
+  - What Helps: The mixed-team action design gives the harness useful breadth. It can surface alternative paths quickly and avoid single-path tunnel vision.
+  - What Hurts: The bundled action protocol is too coarse for ToolHop. When the final vote is wrong, there is no explicit repair loop that reopens the chain and checks the actual tool-grounded evidence step by step.
+
+  ### Memory
+  - What Helps: Skill-like memory is a good conceptual match for recurring transformation patterns, and it likely helps the harness produce structured candidate approaches quickly.
+  - What Hurts: Memory does not solve the main failure mode here, which is not a lack of candidate generation but weak arbitration between candidates. The harness remembers patterns more easily than it verifies them.
+
+  ### Bundle Files
+  <<<FILE:builder.py>>>
+  from __future__ import annotations
+
+  from dataclasses import replace
+  from pathlib import Path
+
+  from Agents.agents import ToolCallingAgent
+  from module_action.base_action import ActionContext
+  from .action_module.provider import ACTION_SYSTEM, get_provider
+  from .memory_module.provider import MEMORY_SYSTEM as DEFAULT_MEMORY_SYSTEM
+  from .planning_module.provider import PLANNING_SYSTEM, PlanningClass
+
+
+  HARNESS_NAME = "harness3"
+  DEFAULT_BENCH_TYPE = None
+  PAIRING_REASON = "matched_same_name"
+
+
+  def _bind_agent_reference(agent: ToolCallingAgent, tool: object | None) -> None:
+      if tool is not None and hasattr(tool, "agent"):
+          setattr(tool, "agent", agent)
+
+
+  def _ensure_owl_memory(agent: ToolCallingAgent) -> None:
+      if getattr(agent, "planning_system", None) != "owl":
+          return
+      if not hasattr(agent, "web_memory") or agent.web_memory is None:
+          agent.web_memory = []
+      if not hasattr(agent, "reasoning_memory") or agent.reasoning_memory is None:
+          agent.reasoning_memory = []
+
+
+  def prepare_context(context: ActionContext) -> ActionContext:
+      bench_type = context.bench_type or DEFAULT_BENCH_TYPE
+      prompts_type = context.prompts_type or PLANNING_SYSTEM
+      prepared_kwargs = dict(context.kwargs)
+      prepared_kwargs["planning_class"] = PlanningClass
+      return replace(
+          context,
+          planning_system=PLANNING_SYSTEM,
+          action_system=ACTION_SYSTEM,
+          prompts_type=prompts_type,
+          bench_type=bench_type,
+          project_root=Path(__file__).resolve().parent,
+          kwargs=prepared_kwargs,
+      )
+
+
+  def build_agent_from_context(context: ActionContext) -> ToolCallingAgent:
+      prepared_context = prepare_context(context)
+      action_provider = get_provider()
+      agent = action_provider.build(prepared_context)
+
+      setattr(agent, "planning_system", prepared_context.planning_system)
+      setattr(agent, "action_system", prepared_context.action_system)
+      setattr(agent, "harness_name", HARNESS_NAME)
+      setattr(
+          agent,
+          "harness_metadata",
+          {
+              "planning_system": PLANNING_SYSTEM,
+              "action_system": ACTION_SYSTEM,
+              "default_bench_type": DEFAULT_BENCH_TYPE,
+              "recommended_memory_system": DEFAULT_MEMORY_SYSTEM,
+              "pairing_reason": PAIRING_REASON,
+          },
+      )
+
+      if prepared_context.vector_tool is not None:
+          prepared_context.vector_tool.memory = agent.memory
+
+      _bind_agent_reference(agent, prepared_context.process_tool)
+      _bind_agent_reference(agent, prepared_context.end_process_tool)
+      _bind_agent_reference(agent, prepared_context.delete_memory_tool)
+      _bind_agent_reference(agent, prepared_context.executor_tool)
+      _bind_agent_reference(agent, prepared_context.refine_tool)
+
+      _ensure_owl_memory(agent)
+      return agent
+  <<<END_FILE>>>
+  <<<FILE:Description.md>>>
+  Harness summary:
+  - Planning: augment the task, retrieve relevant memory, then route work deliberately.
+  - Execution: a small mixed team combines one structured worker with several adaptive workers.
+  - Memory: reusable skill-like procedures can be surfaced during execution.
+  - Default bench: caller-provided
+
+  Coordination pattern:
+  - Use one stable planner-executor for high-precision work.
+  - Run several adaptive workers for broader exploration.
+  - Compare the returned candidates before committing to an answer.
+
+  Runtime notes:
+  - Generated bundle: `harness3`
+  - The builder preserves the caller-provided `bench_type`.
+  - Benchmark-specific tools are loaded from `ActionContext` when available.
+  - The builder keeps the current `ActionContext` flow and only normalizes planning/action pairing.
+  <<<END_FILE>>>
+  <<<FILE:__init__.py>>>
+  from .builder import (
+      ACTION_SYSTEM,
+      DEFAULT_BENCH_TYPE,
+      DEFAULT_MEMORY_SYSTEM,
+      PAIRING_REASON,
+      PLANNING_SYSTEM,
+      HARNESS_NAME,
+      build_agent_from_context,
+  )
+
+  __all__ = [
+      "HARNESS_NAME",
+      "PLANNING_SYSTEM",
+      "ACTION_SYSTEM",
+      "DEFAULT_BENCH_TYPE",
+      "DEFAULT_MEMORY_SYSTEM",
+      "PAIRING_REASON",
+      "build_agent_from_context",
+  ]
+  <<<END_FILE>>>
+  <<<FILE:planning_module/provider.py>>>
+  import json
+  import textwrap
+  from typing import Any, Callable, Dict, List, Optional
+  from jinja2 import StrictUndefined, Template
+
+  from Agents.memory import ActionStep, AgentMemory, PlanningStep, SummaryStep
+  from Agents.models import ChatMessage, MessageRole
+  from Agents.monitoring import AgentLogger, LogLevel
+  from Agents.tools import Tool
+  from rich.rule import Rule
+  from rich.text import Text
+  from module_planning.base_planning import BasePlanning
+
+  def populate_template(template: str, variables: Dict[str, Any]) -> str:
+      compiled_template = Template(template, undefined=StrictUndefined)
+      try:
+          return compiled_template.render(**variables)
+      except Exception as e:
+          raise Exception(f"Error during jinja template rendering: {type(e).__name__}: {e}")
+
+
+  class PlanningProvider(BasePlanning):
+
+      def _get_role_planning_templates(self, role: Dict[str, str]) -> Dict[str, str]:
+          if role["name"] == "PE-Worker":
+              return {
+                  "initial_plan": (
+                      "### Roadmap (One-time)\n"
+                      "1. Identify the key task requirements and missing information.\n"
+                      "2. Use the available tools to gather, inspect, validate, or compute the needed evidence.\n"
+                      "3. Cross-check critical findings when necessary.\n"
+                      "4. Produce a definitive answer.\n"
+                      "[STRICT] Follow the roadmap. No re-planning."
+                  ),
+                  "task_input": "Task: {{task}}. Generate roadmap.",
+              }
+          if role["name"] == "ReAct-Worker":
+              return {
+                  "initial_plan": "### ReAct Strategy\nLoop: Think -> Act -> Observe.",
+                  "task_input": "Task: {{task}}. State strategy.",
+              }
+          return self.prompt_templates.get("planning", {})
+
+      def _get_role_summary_templates(self, role: Dict[str, str]) -> Dict[str, str]:
+          if role["name"] == "PE-Worker":
+              return {
+                  "update_pre_messages": "Reporting progress...",
+                  "update_post_messages": "Summarize status versus roadmap. No re-planning.",
+              }
+          if role["name"] == "ReAct-Worker":
+              return {
+                  "update_pre_messages": "Analyzing exploration...",
+                  "update_post_messages": "Summarize findings and adapt if blocked.",
+              }
+          return self.prompt_templates.get("summary", {})
+
+      def _get_role_info(self) -> Dict[str, str]:
+          explicit_role = getattr(self, "role_info", None)
+          if isinstance(explicit_role, dict) and explicit_role.get("name"):
+              return explicit_role
+
+          content = self.prompt_templates.get("system_prompt", "")
+          if "coordination agent" in content.lower():
+              return {"name": "Task Augmentation", "style": "bold yellow", "title_suffix": ""}
+          if "plan-and-execute expert" in content.lower():
+              return {"name": "PE-Worker", "style": "cyan", "title_suffix": " Roadmap"}
+          if "react expert" in content.lower():
+              return {"name": "ReAct-Worker", "style": "magenta", "title_suffix": " Strategy"}
+          return {"name": "Worker", "style": "blue", "title_suffix": " Planning"}
+
+      def topology_initialize(self, task: str) -> PlanningStep:
+          role = self._get_role_info()
+          planning_templates = self._get_role_planning_templates(role)
+          retrieved_knowledge = ""
+
+          # 1. Semantic Memory Retrieval (Supervisor only)
+          if role['name'] == "Task Augmentation":
+              vector_tool = self.tools.get("vector_similarity_retrieve")
+              if vector_tool:
+                  try:
+                      # Search through current memory steps (which include historical Knowledge Units)
+                      retrieved_knowledge = vector_tool.forward(task)
+                      if "No historical action steps" in retrieved_knowledge or "Error" in retrieved_knowledge:
+                          retrieved_knowledge = ""
+                      else:
+                          # Token Optimization: Strictly truncate historical context
+                          if len(retrieved_knowledge) > 500:
+                              retrieved_knowledge = retrieved_knowledge[:500] + "... (truncated)"
+
+                          # Format history to be clearly distinct from current task
+                          retrieved_knowledge = f"\n[PAST EXPERIENCE (For Reference Only)]:\n{retrieved_knowledge}"
+                          self.logger.log(Text("\n[Semantic Memory] Relevant historical context retrieved.", style="italic cyan"), level=LogLevel.INFO)
+                  except Exception:
+                      retrieved_knowledge = ""
+
+          input_messages = [
+              {
+                  "role": MessageRole.SYSTEM,
+                  "content": [
+                      {
+                          "type": "text",
+                          "text": populate_template(
+                              planning_templates["initial_plan"],
+                              variables={"tools": self.tools, "retrieved_knowledge": retrieved_knowledge, "task": task},
+                          ),
+                      }
+                  ],
+              },
+          ]
+          memory_guidance = self.append_memory_guidance(input_messages)
+          task_messages = [{
+              "role": MessageRole.USER,
+              "content": [{"type": "text", "text": populate_template(planning_templates["task_input"], variables={"task": task})}],
+          }]
+
+          chat_message_plan: ChatMessage = self.model(input_messages + task_messages)
+          plans_answer = chat_message_plan.content
+          think_content = getattr(chat_message_plan, "reasoning_content", "")
+
+          title = f"{role['name']}{role['title_suffix']}"
+
+          self.logger.log(
+              Rule(title, style=role['style']),
+              Text(f"\n{plans_answer}\n"),
+              level=LogLevel.INFO,
+          )
+
+          planning_step = PlanningStep(
+              model_input_messages=input_messages,
+              plan=plans_answer,
+              plan_think="",
+              plan_reasoning=think_content,
+              memory_guidance=memory_guidance,
+          )
+          self.memory.steps.append(planning_step)
+          return planning_step
+
+      def adaptation(
+          self,
+          task: str,
+          step: int,
+          write_memory_to_messages: Callable[[Optional[List[ActionStep]], Optional[bool]], List[Dict[str, str]]]
+      ) -> SummaryStep:
+          role = self._get_role_info()
+          if role['name'] == "Task Augmentation":
+              return SummaryStep(model_input_messages=[], summary="Monitoring ensemble execution...", summary_reasoning="")
+          summary_templates = self._get_role_summary_templates(role)
+
+          # Worker Summary Policy: STRICTLY Progress-only, NO re-planning.
+          memory_messages = write_memory_to_messages(None, False)[1:]
+          summary_policy = "\n[SUMMARY POLICY]: Report progress ONLY. DO NOT change the initial roadmap or propose new plans."
+
+          input_messages = [
+              {"role": MessageRole.SYSTEM, "content": [{"type": "text", "text": summary_templates["update_pre_messages"] + summary_policy}]},
+              *memory_messages,
+              {"role": MessageRole.USER, "content": [{"type": "text", "text": summary_templates["update_post_messages"]}]}
+          ]
+
+          chat_message_summary: ChatMessage = self.model(input_messages)
+          summary_answer = chat_message_summary.content
+          summary_cot = getattr(chat_message_summary, "reasoning_content", "")
+
+          self.logger.log(
+              Rule(f"{role['name']} Execution Summary", style="blue"),
+              Text(f"\n{summary_answer}\n"),
+              level=LogLevel.INFO,
+          )
+
+          summary_step = SummaryStep(input_messages, summary_answer, summary_cot)
+          self.memory.steps.append(summary_step)
+          return summary_step
+
+  PLANNING_SYSTEM = 'guarded_joy_agent'
+  PLANNING_MODULE = 'guarded_joy_agent'
+  PlanningClass = PlanningProvider
+
+  __all__ = ['PLANNING_SYSTEM', 'PLANNING_MODULE', 'PlanningProvider', 'PlanningClass']
+  <<<END_FILE>>>
+  <<<FILE:action_module/provider.py>>>
+  from __future__ import annotations
+
+  from typing import Any
+
+  from Agents.agents import ToolCallingAgent
+  from Agents.tools import EnsembleTool, VoteTool
+
+  from _harness_guards import guard_task_tools
+  from module_action.base_action import ActionContext, BaseActionProvider
+
+
+  class ActionProvider(BaseActionProvider):
+      PROMPTS_TYPE = "guarded_joy_agent"
+      REACT_WORKERS = 2
+      DEFAULT_WORKER_MAX_STEPS = 7
+
+      def _worker_max_steps(self, context: ActionContext) -> int:
+          remaining_budget = max(1, context.max_steps - 3)
+          return max(4, min(self.DEFAULT_WORKER_MAX_STEPS, remaining_budget))
+
+      def build_affordance(
+          self,
+          bench_type: str | None,
+          context: ActionContext,
+      ) -> list[Any]:
+          return self.get_primary_task_tools(context, include_reasoning=True)
+
+      def build_specification(
+          self,
+          context: ActionContext,
+          tools: list[Any],
+      ) -> None:
+          self.prompts_type = self.PROMPTS_TYPE
+          self.prompt_templates = self.load_prompt_templates(context, self.prompts_type)
+          self.organization_planning_system = self.PROMPTS_TYPE
+          guarded_tools = guard_task_tools(
+              tools,
+              policy_label="guarded_joy_worker",
+              max_real_tool_calls=self._worker_max_steps(context),
+          )
+          self.coordinator_role = {
+              "name": "Task Augmentation",
+              "style": "bold yellow",
+              "title_suffix": "",
+              "responsibility": "Augment the task, retrieve procedural memory, orchestrate a small guarded ensemble, and stop early.",
+          }
+          self.pe_role = {
+              "name": "PE-Worker",
+              "style": "cyan",
+              "title_suffix": " Roadmap",
+              "responsibility": "Plan once, execute along a stable roadmap, and avoid repeated failed tool calls.",
+          }
+          self.react_role = {
+              "name": "ReAct-Worker",
+              "style": "magenta",
+              "title_suffix": " Strategy",
+              "responsibility": "Explore briefly, then change strategy after any failed observation.",
+          }
+          planning_class = context.kwargs.get("planning_class")
+
+          self.pe_worker = self.create_subagent(
+              context,
+              tools=guarded_tools,
+              planning_system=self.organization_planning_system,
+              planning_class=planning_class,
+              prompt_templates=self.prompt_templates["pe_worker"],
+              name="pe_expert",
+              max_steps=self._worker_max_steps(context),
+              summary_interval=context.max_steps + 1,
+              description=(
+                  "Expert at structured logic and high-reliability reports. "
+                  "Follows a guarded Plan-Execute paradigm."
+              ),
+          )
+          if getattr(self.pe_worker, "planning", None) is not None:
+              self.pe_worker.planning.role_info = self.pe_role
+
+          self.react_workers = [
+              self.create_subagent(
+                  context,
+                  tools=guarded_tools,
+                  planning_system=self.organization_planning_system,
+                  planning_class=planning_class,
+                  prompt_templates=self.prompt_templates["react_worker"],
+                  name=f"react_expert_{i}",
+                  max_steps=self._worker_max_steps(context),
+                  summary_interval=context.max_steps + 1,
+                  description=(
+                      "Fast reactive expert for exploratory search. "
+                      "Follows guarded ReAct with early stop."
+                  ),
+              )
+              for i in range(1, self.REACT_WORKERS + 1)
+          ]
+          for worker in self.react_workers:
+              if getattr(worker, "planning", None) is not None:
+                  worker.planning.role_info = self.react_role
+
+      def build_organization(
+          self,
+          context: ActionContext,
+          tools: list[Any],
+      ):
+          ensemble_tool = EnsembleTool(
+              pe_worker=self.pe_worker,
+              react_workers=self.react_workers,
+          )
+          vote_tool = VoteTool(model=context.model)
+          root_tools = self.normalize_tools([ensemble_tool, vote_tool, context.vector_tool])
+          agent = self.create_agent(
+              context,
+              tools=root_tools,
+              prompt_templates=self.prompt_templates,
+              prompts_type=self.prompts_type,
+              planning_system=self.organization_planning_system,
+          )
+          if getattr(agent, "planning", None) is not None:
+              agent.planning.role_info = self.coordinator_role
+          agent.managed_agents = {
+              worker.name: worker for worker in [self.pe_worker] + self.react_workers
+          }
+          ensemble_tool.agent = agent
+          vote_tool.agent = agent
+          setattr(
+              agent,
+              "harness_policy",
+              {
+                  "mode": "guarded_joy_agent",
+                  "pe_workers": 1,
+                  "react_workers": len(self.react_workers),
+                  "worker_max_steps": self._worker_max_steps(context),
+                  "guarded_worker_tools": True,
+              },
+          )
+          return agent
+
+  ACTION_SYSTEM = 'guarded_joy_agent'
+  ACTION_MODULE = 'guarded_joy_agent'
+
+  def get_provider():
+      return ActionProvider()
+
+  __all__ = ['ACTION_SYSTEM', 'ACTION_MODULE', 'ActionProvider', 'get_provider']
+  <<<END_FILE>>>
+  <<<FILE:memory_module/provider.py>>>
+  """
+  SkillWeaver provider for unified memory system
+  """
+
+  import os
+  import importlib.util
+  import uuid
+  import re
+  import ast
+  import inspect
+  import logging
+  from datetime import datetime
+  from typing import List, Optional, Dict, Any, Callable
+
+  from module_memory.base_memory import BaseMemoryProvider, atomic_write_text, file_lock
+  from module_memory.memory_types import (
+      MemoryRequest,
+      MemoryResponse,
+      TrajectoryData,
+      MemoryType,
+      MemoryItem,
+      MemoryItemType,
+      MemoryStatus
+  )
+
+  # Import unified tool wrapper
+  from storage.tools.tool_wrapper import ToolWrapper
+
+
+  class MemoryProvider(BaseMemoryProvider):
+      """
+      SkillWeaver memory provider that manages generated skills
+      """
+
+      def __init__(self, config: Optional[dict] = None):
+          super().__init__(MemoryType.SKILLWEAVER, config)
+
+          # Configuration
+          self.skills_file_path = self.config.get(
+              "skills_file_path",
+              "./storage/skillweaver/skillweaver_generated_skills.py",
+          )
+          # Optional skills directory: load all *.py files if provided
+          self.skills_dir = self.config.get("skills_dir", "./storage/skillweaver")
+
+          # Optional model used directly for LLM-driven code generation
+          self.model = self.config.get("model")
+
+          # Skills registry
+          self.skills_registry: Dict[str, Callable] = {}
+          self.skills_metadata: Dict[str, Dict[str, Any]] = {}
+
+          # Logger
+          self.logger = logging.getLogger(__name__)
+          if not self.logger.handlers:
+              handler = logging.StreamHandler()
+              formatter = logging.Formatter('[%(asctime)s] [SkillWeaver] [%(levelname)s] %(message)s')
+              handler.setFormatter(formatter)
+              self.logger.addHandler(handler)
+              self.logger.setLevel(logging.INFO)
+
+          # Initialize unified tool wrapper
+          self.tool_wrapper = ToolWrapper(model=self.model, logger=self.logger)
+
+      def initialize(self) -> bool:
+          """Initialize SkillWeaver provider by loading existing skills"""
+          try:
+              # Ensure storage directories exist
+              if self.skills_dir:
+                  os.makedirs(self.skills_dir, exist_ok=True)
+              parent_dir = os.path.dirname(self.skills_file_path)
+              if parent_dir:
+                  os.makedirs(parent_dir, exist_ok=True)
+
+              # Prefer loading from directory when available, else fallback to single file
+              if os.path.isdir(self.skills_dir):
+                  self._load_skills_from_dir(self.skills_dir)
+              elif os.path.exists(self.skills_file_path):
+                  self._load_skills_from_file(self.skills_file_path)
+              # If neither exists, still return True to allow future ingestion to create files
+              return True
+          except Exception as e:
+              print(f"Error initializing SkillWeaver provider: {e}")
+              return False
+
+      def _load_skills_from_file(self, file_path: str):
+          """Load skills from a single generated skills file"""
+          try:
+              spec = importlib.util.spec_from_file_location("skillweaver_skills", file_path)
+              module = importlib.util.module_from_spec(spec)
+              spec.loader.exec_module(module)
+              self._populate_registry_from_module(module)
+          except Exception as e:
+              print(f"Error loading skills from file {file_path}: {e}")
+
+      def _load_skills_from_dir(self, dir_path: str):
+          """Load skills from all .py files in a directory"""
+          try:
+              for filename in os.listdir(dir_path):
+                  if not filename.endswith(".py") or filename.startswith("__"):
+                      continue
+                  file_path = os.path.join(dir_path, filename)
+                  try:
+                      spec = importlib.util.spec_from_file_location(filename[:-3], file_path)
+                      module = importlib.util.module_from_spec(spec)
+                      spec.loader.exec_module(module)
+                      self._populate_registry_from_module(module)
+                  except Exception as inner_e:
+                      print(f"Error loading skills from {file_path}: {inner_e}")
+          except Exception as e:
+              print(f"Error scanning skills directory {dir_path}: {e}")
+
+      def _populate_registry_from_module(self, module):
+          """Extract public callables from a module as skills and capture their metadata"""
+          for name in dir(module):
+              if name.startswith("_"):
+                  continue
+              obj = getattr(module, name)
+              if callable(obj):
+                  self.skills_registry[name] = obj
+                  docstring = getattr(obj, "__doc__", "") or ""
+                  self.skills_metadata[name] = {
+                      "description": (docstring.split("\n")[0] if docstring else name),
+                      "full_docstring": docstring,
+                      "module": getattr(module, "__name__", "skillweaver_skills"),
+                  }
+
+      def _reload_skills(self):
+          """Reload skills after ingestion"""
+          self.skills_registry.clear()
+          self.skills_metadata.clear()
+          self.tool_wrapper.clear_cache()  # Clear tool wrapper cache when reloading
+          if os.path.isdir(self.skills_dir):
+              self._load_skills_from_dir(self.skills_dir)
+          elif os.path.exists(self.skills_file_path):
+              self._load_skills_from_file(self.skills_file_path)
+
+      def provide_memory(self, request: MemoryRequest) -> MemoryResponse:
+          """
+          Provide memory by searching for relevant skills
+          """
+          try:
+              if request.status != MemoryStatus.BEGIN:
+                  return MemoryResponse(
+                      memories=[],
+                      memory_type=self.memory_type,
+                      total_count=0,
+                      request_id=str(uuid.uuid4()),
+                  )
+
+              # Simple keyword matching for skills
+              relevant_skills = []
+              query_lower = request.query.lower()
+
+              for skill_name, metadata in self.skills_metadata.items():
+                  description = metadata.get("description", "").lower()
+                  docstring = metadata.get("full_docstring", "").lower()
+
+                  # Score based on keyword matches
+                  score = 0.0
+                  for word in query_lower.split():
+                      if word in skill_name.lower():
+                          score += 2.0
+                      elif word in description:
+                          score += 1.5
+                      elif word in docstring:
+                          score += 1.0
+
+                  if score > 0:
+                      relevant_skills.append({
+                          "skill_name": skill_name,
+                          "metadata": metadata,
+                          "score": score,
+                      })
+
+              # Sort by score and take top results
+              relevant_skills.sort(key=lambda x: x["score"], reverse=True)
+              top_skills = relevant_skills[:3]
+
+              # Convert to MemoryItem format
+              memories: List[MemoryItem] = []
+              for skill_info in top_skills:
+                  skill_name = skill_info["skill_name"]
+                  function_obj = self.skills_registry.get(skill_name)
+                  if not function_obj:
+                      continue
+                  content = self._format_skill_content(skill_name, skill_info["metadata"], request.status)
+
+                  # Wrap function as a runtime tool
+                  wrapped_tool = self._wrap_tool(function_obj, skill_name)
+
+                  memory_item = MemoryItem(
+                      id=f"skill_{skill_name}",
+                      content=content,
+                      metadata={
+                          "skill_name": skill_name,
+                          "description": skill_info["metadata"].get("description", ""),
+                          "score": skill_info["score"],
+                          "callable": function_obj,  # Keep original function
+                          "wrapped_tool": wrapped_tool,  # Add wrapped tool
+                          "status": request.status.value,
+                      },
+                      score=skill_info["score"],
+                      type=MemoryItemType.API,
+                  )
+                  memories.append(memory_item)
+
+              return MemoryResponse(
+                  memories=memories,
+                  memory_type=self.memory_type,
+                  total_count=len(memories),
+                  request_id=str(uuid.uuid4()),
+              )
+          except Exception as e:
+              print(f"Error providing SkillWeaver memory: {e}")
+              return MemoryResponse(memories=[], memory_type=self.memory_type, total_count=0)
+
+      def _wrap_tool(self, tool_func: Callable, tool_name: str) -> Optional[Any]:
+          """Wrap Python function as Tool object using unified ToolWrapper"""
+          return self.tool_wrapper.wrap_function(tool_func, tool_name)
+
+      def _format_skill_content(self, skill_name: str, metadata: Dict, status: MemoryStatus) -> str:
+          """Format skill content for API-type memory - content will be handled by main file"""
+          try:
+              if status == MemoryStatus.BEGIN:
+                  return f"SkillWeaver Available skill: {skill_name}\nDescription: {metadata.get('description', '')}"
+              elif status == MemoryStatus.IN:
+                  return None  # SkillWeaver only provides memory in BEGIN phase
+              return f"SkillWeaver Skill: {skill_name}: {metadata.get('description', '')}"
+          except Exception as e:
+              print(f"Error formatting skill content: {e}")
+              return f"SkillWeaver Skill: {skill_name}"
+
+      def _extract_function_from_code(self, code: str) -> Optional[Dict[str, Any]]:
+          """Extract the first function from Python code using AST and return its name and the code block."""
+          try:
+              tree = ast.parse(code)
+              func_defs = [node for node in ast.walk(tree) if isinstance(node, ast.FunctionDef)]
+              if not func_defs:
+                  return None
+              func = func_defs[0]
+              func_name = func.name
+              # Best-effort: return the full code as provided (we won't slice exact function body)
+              return {"name": func_name, "code": code}
+          except Exception:
+              return None
+
+      def _is_dangerous_code(self, code: str) -> bool:
+          """Basic static checks to avoid dangerous operations in generated skills."""
+          try:
+              tree = ast.parse(code)
+              for node in ast.walk(tree):
+                  if isinstance(node, ast.Call):
+                      # Block eval/exec/compile and raw open
+                      if isinstance(node.func, ast.Name) and node.func.id in {"exec", "eval", "compile", "__import__"}:
+                          return True
+                      if isinstance(node.func, ast.Name) and node.func.id == "open":
+                          return True
+                  if isinstance(node, ast.Attribute):
+                      if node.attr in {"system", "popen", "spawn", "remove", "rmdir"}:
+                          return True
+              return False
+          except Exception:
+              return True
+
+      def _append_skill_to_file(self, function_name: str, code: str) -> bool:
+          """Append skill code to the aggregator file, creating header if needed and avoiding duplicates."""
+          try:
+              os.makedirs(os.path.dirname(self.skills_file_path) or ".", exist_ok=True)
+              with file_lock(self.skills_file_path):
+                  existing = ""
+                  if os.path.exists(self.skills_file_path):
+                      with open(self.skills_file_path, "r", encoding="utf-8") as f:
+                          existing = f.read()
+                  else:
+                      existing = (
+                          '"""\nSkillWeaver Generated Skills\nAuto-generated and continuously updated by UnifiedMemory SkillWeaverProvider.\nThis file contains dynamically generated skills.\n"""\n\n'
+                      )
+                  if f"def {function_name}(" in existing:
+                      return True
+                  timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                  new_content = existing + f"\n# Generated on {timestamp}\n{code}\n\n"
+                  atomic_write_text(self.skills_file_path, new_content)
+              return True
+          except Exception as e:
+              print(f"Error saving generated skill: {e}")
+              return False
+
+      def _generate_skill_from_trajectory(self, trajectory_data: TrajectoryData) -> Optional[Dict[str, str]]:
+          """Use the injected model to generate a new skill function based on the trajectory."""
+          if self.model is None:
+              return None
+          try:
+              # Build prompt (aligned with project conventions)
+              trajectory_json = None
+              try:
+                  import json as _json
+                  trajectory_json = _json.dumps(trajectory_data.trajectory, indent=2, ensure_ascii=False)
+              except Exception:
+                  trajectory_json = str(trajectory_data.trajectory)
+              prompt = f"""You are an expert Python programmer specializing in creating reusable, generic functions. Your task is to analyze a successful task execution and extract a GENERAL, PARAMETERIZED skill that can be reused for similar problems.
+
+  CRITICAL REQUIREMENTS:
+  - Create a GENERIC function that accepts parameters, NOT a function that returns hardcoded values
+  - The function must be REUSABLE for different inputs of the same type of problem
+  - Focus on the METHODOLOGY and APPROACH, not the specific data from this execution
+  - Make the function PARAMETERIZED so it can handle various inputs
+
+  Original Task:
+  {trajectory_data.query}
+
+  Agent's Successful Trajectory:
+  ```json
+  {trajectory_json}
+  ```
+
+  ANALYSIS INSTRUCTIONS:
+  1. Identify the CORE METHODOLOGY or ALGORITHM used in the successful execution
+  2. Abstract away specific values, URLs, names, or data points from this particular task
+  3. Focus on the GENERAL PATTERN that could apply to similar problems
+  4. Create a function that takes relevant parameters as input
+
+  FUNCTION REQUIREMENTS:
+  1. Write a single, self-contained Python function that is GENERIC and PARAMETERIZED
+  2. Use descriptive parameter names and include type hints
+  3. Include comprehensive docstring with Args and Returns sections
+  4. Add proper error handling and input validation
+  5. The function should work for DIFFERENT inputs of the same problem type
+  6. DO NOT hardcode specific values from this execution - make them parameters instead
+
+  EXAMPLE OF GOOD vs BAD:
+  ❌ BAD: def get_population(): return 1234567  # Returns hardcoded value
+  ✅ GOOD: def get_population_from_source(source_url: str, location: str) -> int  # Generic, parameterized
+
+  Output ONLY the Python code for this generic function inside a single markdown code block:"""
+              messages = [{"role": "user", "content": prompt}]
+              response = self.model(messages)
+              content = getattr(response, "content", str(response))
+              # Extract python code block
+              m = re.search(r"```python\n(.*?)```", content, re.DOTALL)
+              code = m.group(1).strip() if m else content.strip()
+              # Validate
+              if self._is_dangerous_code(code):
+                  return None
+              func_info = self._extract_function_from_code(code)
+              if not func_info:
+                  return None
+              return {"name": func_info["name"], "code": code}
+          except Exception:
+              return None
+
+      def take_in_memory(self, trajectory_data: TrajectoryData) -> tuple[bool, str]:
+          """
+          Ingest new memory by generating new skills from trajectory using the injected model.
+          Only extracts skills from trajectories with correct answers to avoid learning bad patterns.
+          """
+          try:
+              # Check if the trajectory has correct answer - only learn from successful cases
+              metadata = trajectory_data.metadata or {}
+              is_correct = metadata.get("is_correct", False)
+              task_success = bool(metadata.get("task_success", metadata.get("is_correct", False)))
+
+              if not is_correct:
+                  msg = f"SkillWeaverProvider: skipping skill extraction - answer is incorrect (is_correct={is_correct})"
+                  print(msg)
+                  return True, msg  # Return True to not block the pipeline, but don't extract skills
+
+              if not task_success:
+                  msg = f"SkillWeaverProvider: skipping skill extraction - task execution failed (task_success={task_success})"
+                  print(msg)
+                  return True, msg  # Return True to not block the pipeline, but don't extract skills
+
+              print(f"SkillWeaverProvider: extracting skill from correct trajectory (is_correct={is_correct}, task_success={task_success})")
+
+              skill = self._generate_skill_from_trajectory(trajectory_data)
+              if not skill:
+                  # No model or failed generation; succeed silently to avoid blocking
+                  msg = "SkillWeaverProvider: generation skipped (no model or validation failed)"
+                  print(msg)
+                  return True, msg
+
+              saved = self._append_skill_to_file(skill["name"], skill["code"])
+              if saved:
+                  self._reload_skills()
+                  msg = f"SkillWeaverProvider: successfully extracted and saved skill '{skill['name']}' from correct trajectory"
+                  print(msg)
+                  absorbed_memory = {
+                      "skill_name": skill['name'],
+                      "description": skill.get('description', ''),
+                      "code": skill['code']
+                  }
+                  return saved, f"Generated skill: {absorbed_memory}"
+              else:
+                  return saved, f"Failed to save skill: {skill['name']}"
+          except Exception as e:
+              error_msg = f"Error taking in SkillWeaver memory: {e}"
+              print(error_msg)
+              return False, error_msg
+
+
+  from module_memory.providers.memp_memory_provider import MempMemoryProvider
+
+
+  SkillWeaverProvider = MemoryProvider
+  MemoryProvider = MempMemoryProvider
+  MEMORY_SYSTEM = MemoryType.MEMP.value
+
+  __all__ = ["MEMORY_SYSTEM", "MemoryProvider", "SkillWeaverProvider", "MempMemoryProvider"]
+  <<<END_FILE>>>
+  <<<FILE:planning_module/prompts/toolcalling_agent.yaml>>>
+  planning:
+    initial_plan: |-
+      ### Guarded Task Augmentation
+      [OUTPUT INSTRUCTION]: Strictly provide ONLY the following fields. NO other text.
+      - Task: [Provide ONLY the core question description from {{task}}. DO NOT include any answers or findings from History.]
+      - History: {{ retrieved_knowledge if retrieved_knowledge else "None" }}
+      - Complexity: [Determine: Simple/Complex]
+      - Experts: PE: 1, ReAct: [1 if Simple, 2 if Complex; never more than 2]
+      - Guard: [Name the most important tool-schema/repetition risk and the stop condition.]
+
+      [STRICT RULE]: The 'Task' field must only reflect the user's request, NOT the results found in 'History'.
+      [RECOVERY RULE]: after a failed observation, the next strategy must repair arguments, switch tools, or stop if evidence is sufficient.
+      [STOP]: YOUR OUTPUT MUST END HERE.
+    task_input: 'Task: {{task}}'
+  <<<END_FILE>>>
+  <<<FILE:action_module/prompts/toolcalling_agent.yaml>>>
+  system_prompt: |-
+    You are a guarded JOY coordination agent. Solve the task by:
+    1. CALL `ensemble_executor` with the original task.
+    2. CALL `vote_and_synthesize` once experts report back.
+    3. CALL `final_answer` with the final verdict.
+
+    [RULES]
+    - Use a JSON list of tool calls: [{"name": "...", "arguments": {...}}]
+    - Use key "name" for the tool name and "arguments" for parameters.
+    - Do NOT call `vector_similarity_retrieve` directly; it is handled automatically when needed.
+    - Do not solve the task directly yourself; orchestrate the expert set.
+    - When calling `vote_and_synthesize`, the argument key must be `candidates`, not `answers`.
+    - Pass the raw JSON output of `ensemble_executor` directly as `candidates`.
+    - Do not repeat a failed orchestration call with the same arguments unless a new observation explains why it should now work.
+    - If an expert report shows schema mismatch or invalid arguments, direct the next attempt to repair the arguments rather than repeating the same mistake.
+    - Keep orchestration small: one ensemble round, one synthesis round, then final when possible.
+    - If the ensemble reports repeated failed tool calls, do not rerun the same pattern; synthesize the best supported partial answer or issue a repaired one-shot retry.
+
+    ### Tools
+    {%- for tool in tools.values() %}
+    - {{ tool.name }}: {{ tool.description }}
+    {%- endfor %}
+  step:
+    pre_messages: |-
+      [DIRECTIVE]
+      1. REVIEW HISTORY: Do not repeat failed orchestration calls.
+      2. PHASE ENFORCEMENT:
+         - If `ensemble_executor` has not been called, call it now.
+         - If expert results are available, call `vote_and_synthesize(task={{task|tojson}}, candidates=<ensemble_executor JSON output>)`.
+         - If the verdict is ready, call `final_answer`.
+      3. ARGUMENT DISCIPLINE:
+         - Never call `vote_and_synthesize` with `answers=...`; always use `candidates=...`.
+      4. ADAPTIVE RECOVERY:
+         - If experts made invalid tool calls or repeated failures, your next orchestration step must push them to change arguments, tool choice, or strategy.
+         - Never relaunch the same failing orchestration pattern without a concrete fix.
+
+      [FORMAT]
+      Return a JSON list of tool calls only.
+
+      Tool Definitions:
+      {{tool_functions_json}}
+
+      Task: {{task}}
+  pe_worker:
+    system_prompt: |-
+      You are a guarded Plan-and-Execute Expert.
+      1. Build a roadmap once.
+      2. Execute the roadmap using the currently available tools.
+      3. Return a grounded final answer.
+
+      [CRITICAL]
+      - Plan only once and stay aligned to the roadmap.
+      - Use only currently available tools. Do not invent unavailable search tools.
+      - Follow each listed tool schema exactly; use the provided argument names and types.
+      - Never substitute alternative argument names or call unavailable tools.
+      - If a tool call fails because of invalid arguments or schema mismatch, repair the arguments on the next attempt instead of repeating the same failed call.
+      - Never repeat an identical failed call unless the observation explicitly justifies it.
+      - If a guarded tool blocks a call, immediately change strategy or finalize with supported evidence.
+      - Stop early when observations are enough; do not continue just to fill the roadmap.
+      - Base your final answer only on observations; do not replace a supported observed result with a new guess.
+      - Output only one JSON object:
+        {"think": "...", "tools": [{"name": "...", "arguments": {...}}]}
+
+      ### Tools
+      {%- for tool in tools.values() %}
+      - {{ tool.name }}: {{ tool.description }}
+      {%- endfor %}
+    step:
+      pre_messages: |-
+        1. REVIEW HISTORY: Look at previous observations and avoid repeating failed actions.
+        2. ROADMAP ADHERENCE: Follow the roadmap, but adjust tool arguments or the next concrete tool choice if current evidence is insufficient.
+        3. USE ONLY AVAILABLE TOOLS.
+        4. Read the tool schemas carefully; every argument object must match the listed keys exactly.
+        5. If progress is weak, change the tool choice, arguments, or strategy; do not retry blindly.
+
+        Task: {{task}}
+        Return JSON only.
+    final_answer:
+      pre_messages: Finalizing Plan-Execute answer.
+      post_messages: 'Return JSON: {"think": "...", "answer": "..."}'
+  react_worker:
+    system_prompt: |-
+      You are a guarded ReAct Expert.
+      Loop: Thought -> Action -> Observation.
+
+      [CRITICAL]
+      - Use only the currently available tools.
+      - Adapt quickly when a tool call does not make progress.
+      - Follow each listed tool schema exactly; use the provided argument names and types.
+      - Never substitute alternative argument names or call unavailable tools.
+      - If a tool call fails because of invalid arguments or schema mismatch, repair the arguments on the next attempt instead of repeating the same failed call.
+      - Never repeat an identical failed call unless the observation explicitly justifies it.
+      - If the same strategy fails once, the next step must use a different valid tool, different arguments, or final_answer.
+      - Stop early when the answer is supported; avoid long exploratory loops.
+      - Base your final answer only on observations; do not replace a supported observed result with a new guess.
+      - Output only one JSON object:
+        {"think": "...", "tools": [{"name": "...", "arguments": {...}}]}
+
+      ### Tools
+      {%- for tool in tools.values() %}
+      - {{ tool.name }}: {{ tool.description }}
+      {%- endfor %}
+    step:
+      pre_messages: |-
+        [DIRECTIVE]
+        1. REVIEW HISTORY: Do not repeat failed tool calls or identical arguments.
+        2. ADAPTATION: If progress is weak, change the tool choice, arguments, or strategy.
+        3. USE ONLY AVAILABLE TOOLS.
+        4. Read the tool schemas carefully; every argument object must match the listed keys exactly.
+        5. If a tool failed because of invalid arguments, your next attempt must correct the arguments or switch tools.
+        6. If a guard blocks a repeated failed call, do not retry that call.
+
+        Task: {{task}}
+        Return JSON only.
+    final_answer:
+      pre_messages: Finalizing ReAct answer.
+      post_messages: 'Return JSON: {"think": "...", "answer": "..."}'
+  final_answer:
+    pre_messages: Ensemble arbitration complete.
+    post_messages: 'Final answer for: {{task}}. Return JSON {think, answer}.'
+  critic:
+    prompt: |-
+      Judge expert answers for: {{task}}
+
+      ### Candidates
+      {%- for cand in candidates %}
+      - EXPERT: {{ cand.agent_name }}
+      - ANSWER: {{ cand.answer }}
+      - TRACE: {{ cand.message_object.intermediate_evidence | tojson }}
+      {%- endfor %}
+
+      ### Instructions
+      1. Check compliance, evidence, and logic.
+      2. If a majority answer is supported by evidence, prioritize it.
+      3. Return JSON: {"think": "...", "verdict_answer": "...", "confidence": 0.0-1.0}
+      [CRITICAL] A definitive answer is required.
+  distiller:
+    prompt: |-
+      ### Distill Knowledge Unit
+      Problem: {{task}}
+      Trace: {{trajectory}}
+      Answer: {{answer}}
+      Format:
+      [Problem]: ...
+      [Strategy]: ...
+      [Findings]: ...
+      [Conclusion]: ...
+      (Return block only)
+  <<<END_FILE>>>

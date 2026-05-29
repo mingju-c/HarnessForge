@@ -1,0 +1,445 @@
+schema_version: 2
+description: Compact public harness archive with seven historical design examples.
+harnesses:
+  harness1:
+    role: seed
+    status: seed
+    archive_tier: strong_seed
+    tags:
+    - strong_seed
+    - direct_react
+    - quality_reference
+    design:
+      summary: Direct single-executor ReAct harness with flash planning and ExpeL
+        memory.
+      planning: flash_searcher
+      planning_description: Creates a compact search-oriented plan at the start and
+        refreshes progress only when needed, keeping the task as a single serial
+        chain rather than decomposing into roles.
+      action: single_react
+      action_description: A single executor performs all real tool calls and answer
+        synthesis. This preserves continuity on multi-hop tasks but can accumulate
+        long context when recovery is weak.
+      memory: expel
+      memory_description: ExpeL-style memory stores reusable takeaways from prior
+        attempts and exposes them as soft procedural hints, not as hard constraints.
+      topology: direct_react
+      pairing_reason: fallback_single_react
+    performance:
+      comparison_slice: fair_first100
+      sample_counts:
+        envscaler: 74
+        searchqa: 14
+        toolhop: 12
+      quality:
+        mixed_primary_score: 0.5049
+        mixed_done_proxy: 0.7
+        envscaler_score: 0.5066
+        envscaler_done: 0.7703
+        toolhop_correct: 0.4167
+        toolhop_path: 0.5871
+        searchqa_subem: 0.5714
+        searchqa_used_search: 0.9286
+      efficiency:
+        avg_elapsed_time_sec: 109.87
+        avg_tokens: 198970.6
+        avg_api_calls: 19.55
+        maxstep_rate: 0.13
+      all_available_reference:
+        tasks: 371
+        mixed_primary_score: 0.5011
+        avg_elapsed_time_sec: 89.9
+        avg_tokens: 168096.2
+        maxstep_rate: 0.1078
+    strengths:
+    - strongest all-available mixed primary score among non-trivial seeds
+    - best EnvScaler score in current pool
+    - SearchQA uses search reliably
+    issues:
+    - high token cost and long wall time
+    - failures can keep accumulating long context before stopping
+    evolution_recommendations:
+    - keep the direct single-executor structure as a quality reference
+    - add tighter stop and repeated-call guards for EnvScaler failures
+    - compress observations before reflection to reduce prompt growth
+    notes: Best current quality signal; strong EnvScaler score and stable SearchQA
+      tool use, but expensive.
+  harness2:
+    role: seed
+    status: seed_modified
+    archive_tier: repair_candidate
+    tags:
+    - repair_candidate
+    - concise_reflection
+    design:
+      summary: 'Concise reflection harness: short plan, single executor, periodic
+        reflection, final verifier.'
+      planning: concise_reflection
+      planning_description: Uses a plan capped to a few lines, then triggers compact
+        reflection after fixed intervals so the model can reassess progress without
+        creating a heavy planning transcript.
+      action: concise_reflection
+      action_description: One executor controls the environment. Reflection and the
+        final verifier inspect progress, repeated failures, and answer readiness but
+        should not introduce independent tool-acting agents.
+      memory: agent_kb
+      memory_description: Agent-KB memory provides task-pattern notes and reusable
+        facts. It is useful for repeated tool schemas but can amplify mistakes if
+        bad patterns are retrieved.
+      topology: augmented_react
+      pairing_reason: fallback_single_react
+    performance:
+      comparison_slice: fair_first100
+      sample_counts:
+        envscaler: 83
+        searchqa: 8
+        toolhop: 9
+      quality:
+        mixed_primary_score: 0.3251
+        mixed_done_proxy: 0.61
+        envscaler_score: 0.3193
+        envscaler_done: 0.6627
+        toolhop_correct: 0.1111
+        toolhop_path: 0.4495
+        searchqa_subem: 0.625
+        searchqa_used_search: 1.0
+      efficiency:
+        avg_elapsed_time_sec: 76.82
+        avg_tokens: 180318.8
+        avg_api_calls: 22.13
+        maxstep_rate: 0.26
+      all_available_reference:
+        tasks: 104
+        mixed_primary_score: 0.3267
+        avg_elapsed_time_sec: 76.33
+        avg_tokens: 181201.1
+        maxstep_rate: 0.2596
+    strengths:
+    - SearchQA uses search and currently has strong small-sample subEM
+    - concise-reflection idea is simple enough for future training
+    issues:
+    - high max-step rate on EnvScaler
+    - weak ToolHop correctness
+    - repeated failed tool calls inflate runtime and tokens
+    evolution_recommendations:
+    - strengthen repetition detection after failed observations
+    - force a strategy change after two identical tool failures
+    - tighten final verifier so ToolHop does not collapse to low exact accuracy
+    notes: SearchQA signal is good, but ToolHop and EnvScaler are weak and repeated
+      failures make it slow.
+  harness3:
+    role: seed
+    status: seed_modified
+    archive_tier: diversity_seed
+    tags:
+    - diversity_seed
+    - low_token
+    - guarded
+    design:
+      summary: Guarded JoyAgent-style harness with low-token execution and MEMP memory.
+      planning: guarded_joy_agent
+      planning_description: Keeps planning terse and guard-driven. It favors early
+        commitment and bounded execution over elaborate deliberation.
+      action: guarded_joy_agent
+      action_description: Executes with tool whitelist checks, repeated-call detection,
+        and early-stop guards. The design is cheap, but may stop after shallow or
+        incomplete state updates.
+      memory: memp
+      memory_description: MEMP memory retrieves compact prior experience snippets.
+        The harness exposes memory sparingly to keep token cost low.
+      topology: augmented_react
+      pairing_reason: matched_same_name
+    performance:
+      comparison_slice: fair_first100
+      sample_counts:
+        envscaler: 77
+        searchqa: 12
+        toolhop: 11
+      quality:
+        mixed_primary_score: 0.3259
+        mixed_done_proxy: 0.78
+        envscaler_score: 0.2804
+        envscaler_done: 0.8701
+        toolhop_correct: 0.5455
+        toolhop_path: 0.5126
+        searchqa_subem: 0.4167
+        searchqa_used_search: 0.0
+      efficiency:
+        avg_elapsed_time_sec: 124.38
+        avg_tokens: 20236.0
+        avg_api_calls: 5.82
+        maxstep_rate: 0.02
+      all_available_reference:
+        tasks: 281
+        mixed_primary_score: 0.3077
+        avg_elapsed_time_sec: 119.64
+        avg_tokens: 19096.2
+        maxstep_rate: 0.0178
+    strengths:
+    - low token footprint
+    - low max-step rate
+    - high EnvScaler done rate under the fair first-100 slice
+    issues:
+    - SearchQA used_search is zero
+    - EnvScaler completion does not translate into high score
+    - some traces show no-observation loops
+    evolution_recommendations:
+    - fix SearchQA route so retrieval/search tools are mandatory when available
+    - add final state verifier before completion on EnvScaler
+    - preserve its low-token guard style as a cost-control reference
+    notes: Very token-efficient and rarely reaches max steps, but SearchQA does not
+      actually search and EnvScaler score is low.
+  harness4:
+    role: seed
+    status: seed_modified
+    archive_tier: strong_seed
+    tags:
+    - strong_seed
+    - balanced
+    - reflection_critic
+    design:
+      summary: 'Light reflection harness: short planner, single executor, non-acting
+        critic, final answer.'
+      planning: reflection_critic
+      planning_description: Starts with a short plan and relies on critic checkpoints
+        to decide whether the current route still makes sense, whether a retry is
+        needed, or whether the agent should stop.
+      action: reflection_critic
+      action_description: Only the executor is allowed to operate the environment.
+        The critic is non-acting and checks tool existence, argument plausibility,
+        repeated failures, and stopping readiness.
+      memory: agent_workflow_memory
+      memory_description: Workflow memory stores procedural lessons about successful
+        action sequences. It should bias execution strategy without overriding fresh
+        observations from the current task.
+      topology: augmented_react
+      pairing_reason: matched_same_name
+    performance:
+      comparison_slice: fair_first100
+      sample_counts:
+        envscaler: 81
+        searchqa: 9
+        toolhop: 10
+      quality:
+        mixed_primary_score: 0.3606
+        mixed_done_proxy: 0.67
+        envscaler_score: 0.3464
+        envscaler_done: 0.7284
+        toolhop_correct: 0.4
+        toolhop_path: 0.6188
+        searchqa_subem: 0.4444
+        searchqa_used_search: 1.0
+      efficiency:
+        avg_elapsed_time_sec: 66.75
+        avg_tokens: 156970.6
+        avg_api_calls: 19.6
+        maxstep_rate: 0.19
+      all_available_reference:
+        tasks: 669
+        mixed_primary_score: 0.39
+        avg_elapsed_time_sec: 47.93
+        avg_tokens: 107018.8
+        maxstep_rate: 0.0972
+    strengths:
+    - best current speed-quality balance
+    - SearchQA uses search reliably
+    - reflection critic is lighter than the original multi-expert design
+    issues:
+    - EnvScaler score still trails harness1
+    - some max-step failures remain on stateful tasks
+    evolution_recommendations:
+    - use as the default balanced parent for round-1 mutations
+    - keep critic non-acting and improve its stop/retry decisions
+    - borrow harness1's stronger direct execution discipline where useful
+    notes: 'Best balanced seed: good speed-quality tradeoff, normal SearchQA tool
+      use, and reasonable ToolHop path quality.'
+  harness5:
+    role: seed
+    status: seed
+    archive_tier: repair_candidate
+    tags:
+    - repair_candidate
+    - heavy_orchestration
+    design:
+      summary: AgentOrchestra-style multi-agent harness with heavier coordination
+        and Cerebra fusion memory.
+      planning: agentorchestra
+      planning_description: Decomposes the task through a broader orchestration plan
+        with more explicit coordination between roles or subtasks.
+      action: agentorchestra
+      action_description: Multiple role-like components can contribute to execution
+        and checking. This can improve coverage, but for the 4B model it often adds
+        handoff overhead and repeated work.
+      memory: cerebra_fusion_memory
+      memory_description: Cerebra fusion memory combines richer historical signals
+        and summaries. It can provide broad context but is expensive when exposed
+        too often.
+      topology: augmented_react
+      pairing_reason: matched_same_name
+    performance:
+      comparison_slice: fair_first100
+      sample_counts:
+        envscaler: 81
+        searchqa: 9
+        toolhop: 10
+      quality:
+        mixed_primary_score: 0.427
+        mixed_done_proxy: 0.56
+        envscaler_score: 0.4284
+        envscaler_done: 0.5926
+        toolhop_correct: 0.3
+        toolhop_path: 0.5531
+        searchqa_subem: 0.5556
+        searchqa_used_search: 1.0
+      efficiency:
+        avg_elapsed_time_sec: 102.61
+        avg_tokens: 292135.6
+        avg_api_calls: 26.26
+        maxstep_rate: 0.35
+      all_available_reference:
+        tasks: 367
+        mixed_primary_score: 0.3786
+        avg_elapsed_time_sec: 91.89
+        avg_tokens: 242097.7
+        maxstep_rate: 0.2916
+    strengths:
+    - moderate EnvScaler score despite high cost
+    - SearchQA uses search reliably
+    issues:
+    - highest token cost in the current pool
+    - highest max-step rate among active candidates
+    - multi-agent orchestration appears too heavy for Qwen3-4B
+    evolution_recommendations:
+    - shrink orchestration to one executor plus a small verifier
+    - cap reflection summaries and memory exposure
+    - avoid using this design as a direct parent unless cost is repaired
+    notes: Heavy orchestration consumes the most tokens and often reaches max steps;
+      useful mainly as a negative-cost signal.
+  harness6:
+    role: seed
+    status: seed_modified
+    archive_tier: efficiency_baseline
+    tags:
+    - efficiency_baseline
+    - low_cost
+    design:
+      summary: Guarded small-committee harness with strict budget discipline and
+        SkillWeaver memory.
+      planning: guarded_small_committee
+      planning_description: Uses a small-committee framing with tight budget limits.
+        Planning is intentionally conservative and tries to avoid long exploratory
+        branches.
+      action: guarded_small_committee
+      action_description: Applies whitelist, repeat-call, max-step, and failure guards
+        around a smaller set of acting decisions. This keeps runs cheap but can under-act
+        on stateful tasks.
+      memory: skillweaver
+      memory_description: SkillWeaver memory emphasizes reusable skills and compact
+        procedural patterns. It is suited for low-cost reuse but needs stronger task
+        verification before completion.
+      topology: augmented_react
+      pairing_reason: matched_same_name
+    performance:
+      comparison_slice: fair_first100
+      sample_counts:
+        envscaler: 71
+        searchqa: 17
+        toolhop: 12
+      quality:
+        mixed_primary_score: 0.1684
+        mixed_done_proxy: 0.23
+        envscaler_score: 0.0682
+        envscaler_done: 0.1549
+        toolhop_correct: 0.1667
+        toolhop_path: 0.471
+        searchqa_subem: 0.5882
+        searchqa_used_search: 0.0
+      efficiency:
+        avg_elapsed_time_sec: 38.01
+        avg_tokens: 13369.6
+        avg_api_calls: 5.57
+        maxstep_rate: 0.0
+      all_available_reference:
+        tasks: 901
+        mixed_primary_score: 0.1609
+        avg_elapsed_time_sec: 35.62
+        avg_tokens: 11154.9
+        maxstep_rate: 0.0
+    strengths:
+    - lowest runtime and token cost
+    - zero max-step rate in current runs
+    - useful as a minimal guard baseline
+    issues:
+    - very low EnvScaler done and score
+    - weak ToolHop correctness and path score
+    - SearchQA does not use search
+    evolution_recommendations:
+    - do not use as a main quality parent
+    - reuse its budget discipline in stronger harnesses
+    - add mandatory retrieval route before any SearchQA reuse
+    notes: Fastest and cheapest, but quality is too low; keep as a low-cost baseline
+      and guard/reference source.
+  harness7:
+    role: seed
+    status: seed_modified
+    archive_tier: diversity_seed
+    tags:
+    - diversity_seed
+    - router_debate
+    design:
+      summary: Router/debate harness for read-only tasks with stateful fallback to
+        single executor plus critic.
+      planning: router_debate
+      planning_description: Routes the task first. Read-only retrieval/QA tasks may
+        use independent solvers and a judge, while stateful tasks should follow a
+        single-executor plan.
+      action: router_debate
+      action_description: Debate is restricted to non-mutating tasks. For API-bank or
+        EnvScaler-style environments, the harness should avoid parallel actors and
+        use one executor plus a critic to protect state.
+      memory: dynamic_cheatsheet
+      memory_description: Dynamic cheatsheet memory records concise task heuristics
+        and route decisions. It is useful for selecting search/debate/fallback modes
+        but must not encode dataset-specific labels.
+      topology: augmented_react
+      pairing_reason: flash_goals_direct_parallel_agents
+    performance:
+      comparison_slice: fair_first100
+      sample_counts:
+        envscaler: 76
+        searchqa: 12
+        toolhop: 12
+      quality:
+        mixed_primary_score: 0.3898
+        mixed_done_proxy: 0.63
+        envscaler_score: 0.355
+        envscaler_done: 0.6711
+        toolhop_correct: 0.5
+        toolhop_path: 0.4448
+        searchqa_subem: 0.5
+        searchqa_used_search: 1.0
+      efficiency:
+        avg_elapsed_time_sec: 101.79
+        avg_tokens: 198725.5
+        avg_api_calls: 22.09
+        maxstep_rate: 0.26
+      all_available_reference:
+        tasks: 418
+        mixed_primary_score: 0.3425
+        avg_elapsed_time_sec: 80.39
+        avg_tokens: 149986.5
+        maxstep_rate: 0.1722
+    strengths:
+    - SearchQA uses search reliably
+    - fair first-100 ToolHop correctness is strong
+    - router/debate gives useful architectural diversity
+    issues:
+    - EnvScaler max-step rate is high
+    - all-available ToolHop score drops after more samples
+    - stateful fallback still needs stronger stop and verifier rules
+    evolution_recommendations:
+    - preserve debate only for read-only retrieval tasks
+    - make stateful route single-executor with stricter critic stop rules
+    - add route-level cost budget and repeated-call abort
+    notes: Router/debate has useful SearchQA behavior and good early ToolHop signal,
+      but stateful tasks still run long.

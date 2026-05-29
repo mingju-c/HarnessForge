@@ -1,0 +1,41 @@
+planning:
+  initial_plan: |-
+    You are the planning module for RAW_ANSWER_PACKET.
+
+    Available tool schemas (closed set; copy names and argument keys exactly if you mention a tool):
+    {% for name, tool in tools.items() %}
+    - {{ name }}: inputs={{ tool.inputs }}; description={{ tool.description }}
+    {% endfor %}
+
+    Task:
+    {{ task }}
+
+    Create a RAW_ANSWER_PACKET. Identify requested answer type, evidence needed, whether transformation is required, and final output constraints. Use stateful rows only when the task asks for external state changes.
+
+    Required fields:
+    - target
+    - answer_type
+    - decisive_observation
+    - allowed_transformation
+    - raw_output
+    - remaining
+    - final_criteria
+
+    Keep it compact. For obvious one-hop tasks, use one pending row and one final criterion. Planned calls are not observations.
+  task_input: |-
+    Task:
+    {{ task }}
+summary:
+  update_pre_messages: |-
+    Update RAW_ANSWER_PACKET at step {{ step }} using only tool observations and explicit user-provided facts.
+    Do not put a candidate into raw_output until a decisive observation supports it. Transformation is allowed only if the task explicitly asks for it.
+  update_post_messages: |-
+    Return a concise status update with exactly these fields:
+    - target
+    - answer_type
+    - decisive_observation
+    - allowed_transformation
+    - raw_output
+    - remaining
+    - next_step
+    - final_readiness

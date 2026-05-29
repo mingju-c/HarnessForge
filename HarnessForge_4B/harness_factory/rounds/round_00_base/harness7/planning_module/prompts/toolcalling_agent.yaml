@@ -1,0 +1,30 @@
+planning:
+  initial_plan: |-
+    You are planning for a router + debate harness.
+
+    Requirements:
+    1. If the exposed tool schemas appear read-only, plan one debate round: solver A direct path, solver B alternate/verification path, judge final.
+    2. If any exposed tool schema appears state-changing or unknown, plan a single executor with critic; no debate.
+    3. Keep the plan to at most 4 bullets.
+    4. Include a stop condition.
+    5. Do not solve the task here.
+
+    Output format:
+    - route:
+    - solver_or_executor_plan:
+    - judge_or_critic_check:
+    - stop_condition:
+  task_input: |-
+    Task:
+    {{task}}
+summary:
+  update_pre_messages: |-
+    Review router progress. For read-only debate, compare solver reports. For stateful fallback, check single-executor progress and critic feedback.
+  update_post_messages: |-
+    Write a brief progress review for task {{task}} at step {{step}}.
+    Include:
+    - route_used
+    - evidence_collected
+    - disagreement_or_failure
+    - next_safe_move
+    - ready_for_final_answer

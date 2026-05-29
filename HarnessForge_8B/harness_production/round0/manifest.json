@@ -1,0 +1,96 @@
+{
+  "examples": [
+    {
+      "harness_name": "harness1",
+      "output_path": "harness_production/round0/harness1.yaml",
+      "planning_system": "flash_searcher",
+      "action_system": "single_react",
+      "default_memory_system": "expel",
+      "exact_accuracy": 0.4875,
+      "path_score": 0.7132,
+      "tokens_avg": 51989.32,
+      "report_path": "harness_factory/rounds/round_00_base/harness1/report.md",
+      "metrics_path": "harness_factory/rounds/round_00_base/harness1/metrics.json",
+      "file_count": 9
+    },
+    {
+      "harness_name": "harness2",
+      "output_path": "harness_production/round0/harness2.yaml",
+      "planning_system": "concise_reflection",
+      "action_system": "concise_reflection",
+      "default_memory_system": "agent_kb",
+      "exact_accuracy": 0.5125,
+      "path_score": 0.6744,
+      "tokens_avg": 37500.36,
+      "report_path": "harness_factory/rounds/round_00_base/harness2/report.md",
+      "metrics_path": "harness_factory/rounds/round_00_base/harness2/metrics.json",
+      "file_count": 9
+    },
+    {
+      "harness_name": "harness3",
+      "output_path": "harness_production/round0/harness3.yaml",
+      "planning_system": "guarded_joy_agent",
+      "action_system": "guarded_joy_agent",
+      "default_memory_system": "memp",
+      "exact_accuracy": 0.4125,
+      "path_score": 0.6132,
+      "tokens_avg": 21502.97,
+      "report_path": "harness_factory/rounds/round_00_base/harness3/report.md",
+      "metrics_path": "harness_factory/rounds/round_00_base/harness3/metrics.json",
+      "file_count": 9
+    },
+    {
+      "harness_name": "harness4",
+      "output_path": "harness_production/round0/harness4.yaml",
+      "planning_system": "reflection_critic",
+      "action_system": "reflection_critic",
+      "default_memory_system": "agent_workflow_memory",
+      "exact_accuracy": 0.2,
+      "path_score": 0.2985,
+      "tokens_avg": 4666.86,
+      "report_path": "harness_factory/rounds/round_00_base/harness4/report.md",
+      "metrics_path": "harness_factory/rounds/round_00_base/harness4/metrics.json",
+      "file_count": 9
+    },
+    {
+      "harness_name": "harness5",
+      "output_path": "harness_production/round0/harness5.yaml",
+      "planning_system": "agentorchestra",
+      "action_system": "agentorchestra",
+      "default_memory_system": "cerebra_fusion_memory",
+      "exact_accuracy": 0.475,
+      "path_score": 0.6495,
+      "tokens_avg": 80721.25,
+      "report_path": "harness_factory/rounds/round_00_base/harness5/report.md",
+      "metrics_path": "harness_factory/rounds/round_00_base/harness5/metrics.json",
+      "file_count": 9
+    },
+    {
+      "harness_name": "harness6",
+      "output_path": "harness_production/round0/harness6.yaml",
+      "planning_system": "guarded_small_committee",
+      "action_system": "guarded_small_committee",
+      "default_memory_system": "skillweaver",
+      "exact_accuracy": 0.3,
+      "path_score": 0.4711,
+      "tokens_avg": 4152.48,
+      "report_path": "harness_factory/rounds/round_00_base/harness6/report.md",
+      "metrics_path": "harness_factory/rounds/round_00_base/harness6/metrics.json",
+      "file_count": 9
+    },
+    {
+      "harness_name": "harness7",
+      "output_path": "harness_production/round0/harness7.yaml",
+      "planning_system": "router_debate",
+      "action_system": "router_debate",
+      "default_memory_system": "dynamic_cheatsheet",
+      "exact_accuracy": 0.2,
+      "path_score": 0.3796,
+      "tokens_avg": 4106.07,
+      "report_path": "harness_factory/rounds/round_00_base/harness7/report.md",
+      "metrics_path": "harness_factory/rounds/round_00_base/harness7/metrics.json",
+      "file_count": 9
+    }
+  ],
+  "combined_prompt_path": "harness_production/round0/prompt_examples.md"
+}

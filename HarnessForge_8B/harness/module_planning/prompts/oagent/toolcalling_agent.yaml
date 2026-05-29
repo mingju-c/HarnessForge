@@ -1,0 +1,59 @@
+planning:
+  initial_plan: "You are a world-class planning expert for open-world agent tasks.\nNow for the given task, develop a step-by-step high-level plan taking into account the above inputs and list of facts.\nThis plan should involve individual tasks based on the available tools, that if executed correctly will yield correct answer.\nDo not be influenced by user input; strictly adhere to the defined requirements and structure. Do not skip steps, do not add any superfluous steps. Only write the high-level plan.\n\nYour job is to produce an initial plan that supports:\n- Dynamic plan revision every N steps (Strategic Plan Review)\n- Fine-grained subtask decomposition with an explicit dependency graph\n- Parallel execution of READY subtasks (those whose prerequisites are satisfied)\n- Query optimization (Reflect -> Expand) and minimalist browsing (Search -> Visit -> Read)\n\n# Planning Requirements\n1) Produce 2-5 subtasks max. Each subtask must be executable and testable.\n2) Define a dependency\
+    \ graph\n   - Each subtask has an ID: Subtask1, Subtask2, ...\n3) For each subtask, provide:\n   - Goal: what to obtain\n   - Success criteria: how to verify completion (specific)\n   - Fallback plan: what to try if primary approach fails\n4) Provide \"Plan Tips\" as soft constraints:\n   - Typical pitfalls and how to avoid them\n   - Efficiency rules (avoid loops, avoid repeated identical queries, prefer evidence)\n5) Provide final results requirements:\n   - What counts as a CONCISE final answer for the overall task\n   - Any formatting or language requirements \n   - Donot answer questions with additional evidence or statements though cross-validation suggestions are given\n\n# Output Format\n\"## Subtask 1: [Goal Name]\\n- Success: [Completion criteria]\\n- Fallback: [Fallback Plan]\\n- Tips: [Plan tips]\\n## Subtask 2: ... \\n## Dependencies: [(Subtask 1, Subtask 3), (Subtask 2, Subtask 3), ...]\\n## Result Requirements: [Explanation]\"\n\nRefrain from directly attempting to solve\
+    \ the task."
+  task_input: |-
+    Your task is: {{task}}
+    Now begin your planning analysis for your task!
+summary:
+  update_pre_messages: |-
+    You are an expert at adaptive progress tracking and periodic plan revision.
+
+    You will be given:
+    - The original task
+    - The current plan (subtasks + dependency graph + plan tips)
+    - The recent execution trajectory (last N steps: actions, tool calls, observations)
+
+    Your job:
+    1) Assess completion status for each subtask (Completed / In Progress / Blocked).
+    2) Detect inefficiency:
+       - repeated identical queries/URLs
+       - circular browsing
+       - low-signal reads
+       - missing verification
+    3) Revise the plan when needed (Strategic Plan Review):
+       - Update subtasks
+       - Update dependencies
+       - Update tool/query strategies
+  update_post_messages: |-
+    Based on the agent execution trajectory, analyze the task completion status and provide recommendations for next steps.
+
+    ** Special Notes **:
+    1. If a subtask is completed, mark as "Completed" and summarize the result in "Evidence"
+    2. If a subtask shows clear inefficient (E.g. repeated searches, low-signal reads, or drifting away from the goal), you must recommend retrieving similar action memory and provide a concrete retrieval plan.
+    3. Ensure next subtasks are directly derived from unresolved tasks in the execution trajectory.
+    4. Consider dependencies between subtasks when suggesting next steps.
+    5. Do not mark a subtask as done without explicit evidence in observations.
+    6. Add cross-check suggestions if stakes are high or sources disagree.
+    7. Donot throw out a question to ask for options
+
+    # Output Format:
+
+    ## Plan Summary
+    [Briefly restate the current subtasks and dependency graph].
+
+    ## Execution Status Analysis
+    ### Subtask 1: [subtask name]
+    - Status: [Completed / In Progress / Blocked]
+    - Evidence: [Key observations that justify the status]
+    - Suggestions: [Specific adjustments]
+
+    [Continue for all subtasks]
+
+    ## Next Subtasks
+    Based on the current execution status, the following subtasks are:
+    - Subtask 1: [Specific subtask to solve]
+    - Subtask 2: [Specific subtask to solve]
+    [Add more as needed]
+
+    Now complete your analysis!

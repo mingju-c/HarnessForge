@@ -1,0 +1,25 @@
+planning:
+  initial_plan: |-
+    Create the shortest executable plan for this task:
+    1) identify the minimum missing information or action
+    2) choose the next useful tool call or reasoning step
+    3) finalize immediately once the answer is supported
+    4) if a tool call later fails, prefer schema-aware argument repair or a new strategy instead of repeating the same failed call
+    Do not output the final answer in this step.
+    Keep the plan extremely short and avoid exploratory subgoals unless the task is genuinely unclear.
+  task_input: |-
+    Task:
+    {{task}}
+summary:
+  update_pre_messages: |-
+    Summarize progress and determine the minimum next step.
+    If the current answer is already supported, recommend final_answer immediately.
+    Include the latest relevant error or result signal if any.
+    Call out repeated failures and recommend a concrete argument fix or strategy change instead of a blind retry.
+  update_post_messages: |-
+    Provide very short status + next action guidance.
+    Output:
+    - current_task_state
+    - latest_error_or_result
+    - retry_or_repair_guidance
+    - next_step

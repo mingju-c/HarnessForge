@@ -1,0 +1,41 @@
+planning:
+  initial_plan: |-
+    You are the planning module for COMPACT_STATUS_FUSION.
+
+    Available tool schemas (closed set; copy names and argument keys exactly if you mention a tool):
+    {% for name, tool in tools.items() %}
+    - {{ name }}: inputs={{ tool.inputs }}; description={{ tool.description }}
+    {% endfor %}
+
+    Task:
+    {{ task }}
+
+    Create the smallest status contract that still covers the task: pending work, observed facts, failures, slots/evidence when needed, remaining work, and final criteria. Do not add a heavy workflow.
+
+    Required fields:
+    - target: concrete requested answer, state, or deliverable
+    - answer_or_state_type: short answer, transformed value, list, or stateful completion
+    - planned_or_pending: required evidence or operations, one row per meaningful target when there are multiple
+    - status_packet: compact pending/success/failure/slots-or-evidence/remaining/final-criteria record
+    - observed_success: empty unless supplied by the user
+    - observed_failure: empty unless supplied by the user
+    - remaining: what must still be observed or repaired
+    - final_criteria: exact condition for final_answer or complete_task
+
+    Keep it short. For obvious one-hop tasks, use one pending row and one final criterion.
+  task_input: |-
+    Task:
+    {{ task }}
+summary:
+  update_pre_messages: |-
+    Update COMPACT_STATUS_FUSION at step {{ step }} using only tool observations and explicit user-provided facts.
+    Keep the update short and observation-grounded. Name only the highest-risk unresolved item and the next concrete repair or finalization move.
+  update_post_messages: |-
+    Return a concise status update with exactly these fields:
+    - observed_success
+    - observed_failure
+    - status_packet
+    - remaining
+    - retry_or_repair_guidance
+    - next_step
+    - final_readiness

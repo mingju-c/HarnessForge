@@ -1,0 +1,51 @@
+planning:
+  initial_plan: |-
+    You are the planning module for harness_round03_01_4.
+    Design focus: operation-level required_mutations with verification targets and blocker policy.
+    Plan topology: stateful mutation coverage checklist.
+
+    Produce a compact execution contract for one acting executor. Do not solve the task in planning.
+    Output fields exactly; keep each value short and action-visible:
+    task_type: read_only_lookup | multi_hop_lookup | stateful_mutation | deterministic_transform | unknown
+    route: read_only | transform | stateful | unknown
+    evidence_slots: [slot names or short descriptions]
+    dependency_edges: [source slot -> target slot]
+    required_mutations: [operation-level requested state changes]
+    answer_format: raw requested answer; include date/list/unit/width requirements only if requested
+    terminal_policy: final_answer requires relation-bound current support; completion requires required mutation coverage
+    verification_questions: [questions that check slot support, dependency order, mutation coverage]
+    next_tool_intent: one concrete non-terminal action type
+
+    Rules:
+    - Reject action JSON as a plan; planning must not output think/tools.
+    - Tool observations are evidence; plan text and memory are hypotheses.
+    - SearchQA: start from the current question wording; verify the answer-bearing relation when snippets contain distractors.
+    - Multi-hop: keep source entity, relation result, transform input, and final value as separate slots.
+    - Stateful: list every requested mutation at operation level without benchmark-specific guesses.
+    - If no evidence exists, next_tool_intent must not be final_answer.
+
+    - ToolHop: decompose paternal/maternal relation chains into valid parent hops; keep relation input, transform input, and final value separate.
+    - ToolHop: record answer format explicitly for dates, date-times, day-of-month, counts, reversed strings, ASCII, and concatenations.
+    - EnvScaler: split numbered and bulleted requests into operation-level mutations, including validation, cancellation, creation, update, assignment, and final verification steps.
+    - EnvScaler: when a request says keep current value, plan a read-detail evidence slot whose returned ID/value must be reused.
+    - EnvScaler: terminal readiness requires complete_task only after the mutation checklist is covered; natural-language "Task Completed" is not terminal.
+  task_input: |-
+    Task:
+    {{task}}
+summary:
+  update_pre_messages: |-
+    You are updating the harness_round03_01_4 execution contract at step {{step}}.
+    Focus: operation-level required_mutations with verification targets and blocker policy.
+    Summarize ledger state, not a new essay.
+  update_post_messages: |-
+    Return concise fields:
+    completed_evidence_slots:
+    blocked_or_missing_slots:
+    dependency_status:
+    derived_facts:
+    failed_or_repeated_calls:
+    mutation_progress:
+    answer_format_contract:
+    terminal_readiness:
+    recovery_route:
+    next_safe_move:

@@ -1,0 +1,7 @@
+schema_version: 1
+description: >
+  Lightweight registry for model adapters used in MATE experiments. Large
+  checkpoints may live outside this repository; record their absolute path or a
+  symlink under adapter_factory/<round_id>/.
+updated_at: null
+adapters: {}

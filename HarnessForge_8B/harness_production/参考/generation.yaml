@@ -1,0 +1,150 @@
+# Generation Phase Prompt Template
+# This prompt is used in Phase 2 to generate new memory system configurations
+
+prompt_template: |
+  ## Phase 2 – Memory System Generation
+
+  ### Objective
+  Build an innovative, production-grade memory provider that improves overall performance across diverse task types.
+
+  ### Context
+  **Memory Integration**: Two memory types supported (tool memory is optional):
+  - **Text Memory** (required): Injected into agent's prompt at BEGIN and IN phases (guidance, strategies, constraints)
+  - **Tool Memory** (optional): Injected as executable API functions (MemoryItemType.API) that agent can call
+  
+  After task completion, extracts and stores experience from trajectory data.
+  
+  **System Constraints**: Core agent loop cannot be modified. Memory system can evolve internally (representation, retrieval, update, indexing strategies).
+
+  ### Reference Materials
+  **Template Provider**: {default_provider} (reference only)
+  {provider_template}
+  
+  **Analysis Report**: Review the analysis below. Adopt 2-3 innovative points from the recommendations, or create your own innovations. Complexity must be >= template system.
+  {analysis_section}
+  
+  **Memory Types** (CRITICAL - Read Carefully): The list below contains ALL existing memory systems in the codebase. Your generated memory system MUST NOT duplicate any existing system names. Create innovative and distinctive naming that is creative, captivating, and stands out from the crowd.
+  {memory_types_definition}
+  
+  **WARNING**: Do NOT reuse or slightly modify existing memory type names. Your system must have a completely unique identity.
+
+  ### Innovation Suggestions (Optional Reference)
+  - **Hierarchical Memory**: Multi-tier storage (working/episodic/semantic/meta-cognitive layers)
+  - **Graph-Based Memory**: Knowledge graphs with entity-relation triplets, traversal-based retrieval
+  - **Adaptive Decay**: Dynamic importance scoring, time-based decay, periodic consolidation
+  - **LLM Routing**: Dynamic query routing, multi-source synthesis, conflict resolution
+
+  ### Core Requirements
+
+  **1. Evolution & Innovation**
+  - Build upon the template system but introduce significant improvements
+  - Adopt 2-3 innovation points from analysis report OR create novel innovations
+  - Complexity must be >= template system (no simple fallbacks or trivial modifications)
+  - Must be a complete, production-ready implementation
+  - Use novel naming conventions, do not duplicate names of existing systems
+
+  **2. Implementation Standards**
+  - **NO hard-coded matching** - Use LLM-based routing/reasoning or semantic embeddings for retrieval
+  - **NO simple fallbacks** - Implement sophisticated logic, not trivial keyword matching
+  - Adaptive filtering: Automatically decide whether to return content based on context
+  - Robust error handling with appropriate logging
+  - Support cold-start scenarios
+
+  **3. Technical Conventions**
+  - **LLM Usage**: Retrieve via `self.model = self.config.get("model", None)`, call as:
+    ```python
+    messages = [{{"role": "user", "content": [{{"type": "text", "text": prompt}}]}}]
+    response = self.model(messages)
+    result = getattr(response, "content", str(response)).strip()
+    ```
+  - **Embeddings**: If using semantic embeddings for retrieval, use SentenceTransformer with local caching:
+    ```python
+    from sentence_transformers import SentenceTransformer
+    self.embedding_model = SentenceTransformer('sentence-transformers/all-MiniLM-L6-v2')
+    embeddings = self.embedding_model.encode(texts, convert_to_numpy=True)
+    ```
+    Alternatively, use pure LLM-based routing without embeddings
+  - **Tool Memory Handling (Optional)**:
+    - If your design includes tool/API memories, follow these conventions:
+    - **Extraction**: Use LLM to generate parameterized functions from successful trajectories (avoid hardcoded returns)
+    - **Storage**: Save functions to .py file, load with importlib, metadata to JSON for retrieval
+    - **Wrapping**: Use unified `ToolWrapper` from `storage.tools.tool_wrapper`:
+      ```python
+      from storage.tools.tool_wrapper import ToolWrapper
+      self.tool_wrapper = ToolWrapper(model=self.model, logger=self.logger)
+      wrapped_tool = self.tool_wrapper.wrap_function(func, func_name)
+      ```
+    - **Return**: MemoryItem(type=MemoryItemType.API, metadata={{"wrapped_tool": wrapped_tool, "callable": func}})
+    - Text-only memory systems can skip tool handling entirely
+  - **Imports**: 
+    - From `EvolveLab.base_memory`: BaseMemoryProvider (required)
+    - From `EvolveLab.memory_types`: MemoryRequest, MemoryResponse, MemoryItem, MemoryItemType, MemoryStatus, MemoryType, TrajectoryData (required)
+    - From `storage.tools.tool_wrapper`: ToolWrapper (optional, only if using tool memories)
+    - DO NOT redefine these types
+
+  **4. Core Methods**
+  - `provide_memory(request: MemoryRequest)`: Use request.context, request.query, request.status (BEGIN/IN). Return MemoryResponse with:
+    - Text memories: MemoryItem with type=MemoryItemType.TEXT (required)
+    - Tool memories: MemoryItem with type=MemoryItemType.API, metadata containing wrapped Tool object (optional)
+  - `take_in_memory(trajectory_data: TrajectoryData)`: Extract from trajectory:
+    - Text memories: Strategic guidance, patterns, constraints (required, from all trajectories)
+    - Tool memories: Reusable Python functions (optional, from successful trajectories only)
+
+  ## Output Format (CRITICAL - Must Follow Exactly)
+
+  1. Output **only** one system in Markdown format
+  2. Use bolded key-value pairs (**key**: value) for all section items
+  3. Required sections:
+     - ## Provider Information: **Class Name** and **Module Name**
+     - ## Provider Code: Single python code block
+     - ## Configuration: Bolded key-value pairs
+     - ## Memory Type: **Enum Name** and **Enum Value**
+  4. No explanations, filenames, or extra content outside the system
+  5. Python code must inherit from BaseMemoryProvider and be syntactically valid
+
+  ### Configuration Format Rules
+  
+  **Format**: `**key**: value` (one per line, no backticks, no parenthetical notes)
+  
+  **Value Types** (use Python style):
+  - Integers: `5`, `10`, `-3`
+  - Floats: `0.75`, `3.14`, `-0.5`
+  - Booleans: `True` or `False` (capitalize first letter)
+  - Strings: `./storage/path` or `"./storage/path"` (quotes optional for simple strings)
+  - Dictionaries: `{{"text": 0.3, "semantic": 0.7}}` (use double curly braces in template)
+  - Lists: `["item1", "item2"]` or `[1, 2, 3]`
+  - None: `None`
+  
+  **CRITICAL - Storage Path Format**: All storage paths must follow format `./storage/{{Enum Value}}/...` where `Enum Value` is your generated memory system's enum value.
+  
+  **Example Configuration** (assuming your Enum Value is `my_memory`):
+  
+  ## Configuration
+  
+  **database_path**: ./storage/my_memory/data.json
+  **top_k**: 5
+  **enable_graph**: True
+  **similarity_threshold**: 0.75
+  **search_weights**: {{"text": 0.3, "semantic": 0.7}}
+  **field_names**: ["query", "approach", "result"]
+
+  ### Naming Rules (CRITICAL)
+  **Enum Name**: UPPERCASE_WITH_UNDERSCORES
+  **Enum Value**: lowercase_with_underscores
+  **Class Name**: PascalCase with "Provider" suffix
+  **Module Name**: lowercase_with_underscores with "_provider" suffix
+
+  **Example:**
+  - Enum Name: ADAPTIVE_VALIDATOR_MEMORY
+  - Enum Value: adaptive_validator_memory
+  - Class Name: AdaptiveValidatorMemoryProvider
+  - Module Name: adaptive_validator_memory_provider
+
+  ### Final Checklist
+  - **Unique Naming (CRITICAL)**: Create innovative and distinctive names that are completely different from ALL existing memory systems. Your naming should be creative, captivating, and memorable - avoid any duplication or slight modifications of existing names
+  - Innovation >= template complexity
+  - Production-ready implementation
+  - NO hard-coded matching
+  - NO simple fallbacks
+  
+  **FINAL REMINDER**: Review the Memory Types list above one more time. Your system's name MUST be entirely unique and NOT present in that list. Choose a name that showcases creativity and innovation.

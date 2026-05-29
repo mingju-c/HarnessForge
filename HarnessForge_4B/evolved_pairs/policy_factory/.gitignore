@@ -1,0 +1,7 @@
+# Keep policy manifests in git, but do not commit large local checkpoints.
+*/model/
+*/checkpoint-*/
+*.bin
+*.safetensors
+*.pt
+*.pth

@@ -1,0 +1,19 @@
+{
+  "num_tasks": 80,
+  "answer_correct": 0.5125,
+  "has_valid_answer": 1.0,
+  "path_score": 0.6744,
+  "average_actions": 5.35,
+  "average_tool_calls": 5.4875,
+  "prompt_tokens_total": 2899146,
+  "completion_tokens_total": 100883,
+  "tokens_total": 3000029,
+  "prompt_tokens_avg": 36239.32,
+  "completion_tokens_avg": 1261.04,
+  "tokens_avg": 37500.36,
+  "runtime_total_min": 81.06,
+  "runtime_avg_sec": 60.79,
+  "harness_name": "harness2",
+  "framework_name": "agent_kb",
+  "source_result_file": "output/toolhop_round1_harness2/toolhop_flash_searcher_flash_searcher_agent_kb_local_qwen3-aevolve_closed_results.jsonl"
+}

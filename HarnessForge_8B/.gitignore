@@ -1,0 +1,61 @@
+# Secrets and local configuration
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+id_rsa*
+*.credentials
+
+# Python caches and local tooling
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Virtual environments
+.venv-taubench/
+.venv/
+.venv-*/
+venv/
+env/
+
+# Jupyter/editor artifacts
+.ipynb_checkpoints/
+.DS_Store
+.vscode/
+.idea/
+
+# Runtime outputs, memories, checkpoints, and model caches
+storage/
+output/
+outputs/
+logs/
+*.log
+*.lock
+*.tmp
+
+# Large model/data artifacts
+# Public release default: keep harness source, not local datasets.
+/data/
+data/mixeddata/raw/
+data/mixeddata/all.jsonl
+data/mixeddata/train.jsonl
+data/mixeddata/val.jsonl
+data/mixeddata/evolution_splits/
+eval_bench/qa/source_data/
+*.safetensors
+*.bin
+*.pt
+*.pth
+*.gguf
+*.parquet
+
+# Scratch command logs / local run notes
+vllm_*.txt
+vllm*.txt
+run*.txt
+eval_bench.txt*

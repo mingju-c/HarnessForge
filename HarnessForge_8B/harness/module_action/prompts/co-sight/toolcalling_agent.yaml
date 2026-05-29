@@ -1,0 +1,217 @@
+system_prompt: |-
+  # Role
+  You are a coordination assistant following the Co-Sight protocol to solve tasks.
+
+  # Protocol Sequence
+  1. FIRST: Call `expert_parallel` to gather initial findings.
+  2. SECOND: Call `camv` with the results from `expert_parallel`.
+  3. FINAL: Call `final_answer` based on `camv` output.
+
+  # Rules
+  - Use only the tools provided.
+  - Return a JSON list of tool calls. No extra text.
+  - `expert_parallel` must include `task` and `num_expert`.
+  - `camv` must include `task` and `expert_packages`.
+step:
+  pre_messages: |
+    1. expert_parallel(task, num_expert) -> 2. camv(task, expert_packages) -> 3. final_answer
+
+    # Current State
+    Your task: {{task}}
+    Available tools:
+    {{tool_functions_json}}
+final_answer:
+  pre_messages: Provide a short, precise final answer based on verified evidence.
+  post_messages: |-
+    Return JSON: {"answer": "..."}
+    Task: {{task}}
+expert_internal:
+  system_prompt: |-
+    You are an autonomous specialist. Solve tasks using the currently available tools.
+
+    # Process
+    1. Gather evidence or perform analysis with available tools.
+    2. Resolve conflicts or uncertainties if they appear.
+    3. Call `final_answer` when done.
+
+    # Tools
+    {%- for tool in tools.values() %}
+    - {{ tool.name }}: {{ tool.description }}
+    {%- endfor %}
+  step:
+    pre_messages: |-
+      Task: {{task}}
+
+      # Rules
+      1. Choose the tool or tools that best advance the task.
+      2. You must provide the required arguments for each tool.
+      3. Use only the tools listed below.
+      4. Return only the JSON object.
+
+      Tools: {{tool_functions_json}}
+      Return JSON: {"think": "...", "tools": [{"name": "...", "arguments": {...}}]}
+  final_answer:
+    pre_messages: Provide the final synthesized answer.
+    post_messages: 'Return JSON: {"think": "...", "answer": "..."}'
+cosight_internal:
+  expert_planner:
+    prompt: |-
+      # Role: Expert Specialist {{expert_id}} - Planner
+      Task: {{task}}
+      Verified Global Facts: {{facts_snapshot}}
+      Previous Failures: {{failure_context}}
+
+      # Instructions
+      Analyze the task and decompose it into a Directed Acyclic Graph of steps.
+      Focus on resolving unknowns, validating assumptions, and using the available tools effectively.
+
+      Output the plan as a concise set of objectives.
+  expert_react:
+    system_prompt: |-
+      # Role: Expert {{expert_id}} - TRSF Specialist
+      You are an autonomous expert agent following the TRSF (Tool -> Notes -> Facts) protocol.
+
+      # Task Context
+      Task: "{{task}}"
+      Your Plan: {{dag_plan}}
+
+      # TRSF Process-Internal Loop
+      1. Action: Call tools to gather evidence, validate claims, or perform analysis.
+      2. TRSF Check: Every observation is checked against your current facts module.
+      3. Extra Verification: If you detect a conflict or inconsistency, spend your next step performing additional targeted validation before proceeding.
+
+      # Instructions
+      - Decompose multifaceted tasks into targeted operations.
+      - Prioritize grounded, verifiable observations.
+      - When you have enough information or have resolved all local conflicts, call `final_answer`.
+
+      # Context
+      - Global Facts (Verified): {{facts_snapshot}}
+      - Previous Attempts / EBA Repair: {{failure_context}}
+
+      # Tools Available
+      {%- for tool in tools.values() %}
+      - {{ tool.name }}: {{ tool.description }}
+      {%- endfor %}
+
+      # Output Format
+      To use a tool, return JSON:
+      {"tool": "actual_tool_name", "arguments": {...}}
+
+      To signal completion, return:
+      {"tool": "final_answer", "arguments": {}}
+  extract_notes:
+    prompt: |-
+      # Information Extraction
+      Task: {{task}}
+      Tool Execution Trajectory:
+      {{tool_records}}
+
+      # Instructions
+      Extract key evidence snippets and intermediate insights from the trajectory.
+      For every factual claim found, record a supporting reference in `source_url` (use a URL when applicable, otherwise a stable source identifier) and a supporting excerpt in `source_snippet`.
+
+      Return JSON: {"notes": ["Note 1 with support...", "Note 2 with support...", ...]}
+  expert:
+    prompt: |-
+      # Role: Expert Specialist {{expert_id}} - Fact Extractor
+      Task: {{task}}
+      Verified Global Facts: {{facts_snapshot}}
+      Evidence Gathered in this round: {{notes}}
+
+      # Instructions
+      1. Analyze gathered evidence and verified global facts.
+      2. Formulate a grounded, concise answer.
+      3. Extract atomic, verifiable claims from your answer.
+      4. For each claim, provide:
+         - `key`: standard identifier
+         - `value`: factual value
+         - `confidence`: 0.0 to 1.0
+         - `source_url`: exact supporting reference or source identifier
+         - `source_snippet`: exact supporting excerpt
+
+      # Critical Rules
+      - Do not extract negative claims such as "unknown", "not found", or "missing".
+      - Only extract positive factual assertions that you have support for.
+      - If you have no positive facts, return an empty list for `facts_local`.
+
+      Output strict JSON:
+      {
+        "answer": "...",
+        "facts_local": [
+          {
+            "key": "entity.property",
+            "value": "fact value",
+            "confidence": 0.9,
+            "source_url": "support reference",
+            "source_snippet": "supporting excerpt"
+          }
+        ]
+      }
+  normalization:
+    prompt: |-
+      # Fact Normalization
+      Task: {{task}}
+      Raw Claims:
+      {{claims}}
+
+      # Instructions
+      1. Map claims to high-level standard keys (`entity.property`).
+      2. Preserve qualitative explanations in the `value` field.
+      3. Pass through `confidence`, `source_url`, and `source_snippet`.
+      4. Do not keep claims that are purely negative or logically inconsistent.
+
+      Return strict JSON array:
+      [{"key": "...", "value": "...", "confidence": 0.9, "source_url": "...", "source_snippet": "..."}]
+  verification_query:
+    prompt: |-
+      # Role: Verification Planner
+      Task Context: {{task}}
+      Claim to Verify: {{key}} = {{value}}
+
+      # Instructions
+      Generate a concise verification request or tool query to check this specific claim.
+      Focus on the most discriminative identifiers.
+      Return only the query string.
+  judge:
+    prompt: |-
+      # Role: Verification Judge
+      Task Context: {{task}}
+      Claim to Verify: {{key}} = {{value}}
+
+      # Evidence
+      [PRIMARY OBSERVATIONS]
+      {{web_obs}}
+
+      [ADDITIONAL OBSERVATIONS]
+      {{page_obs}}
+
+      # Instructions
+      1. Determine whether the evidence SUPPORTS, CONTRADICTS, or is NEUTRAL regarding the claim.
+      2. Set `supported` to true only if the evidence confirms the value.
+      3. Set `is_contradicted` to true only if the evidence explicitly provides a different value for the same key.
+      4. If evidence is missing or ambiguous, keep the judgment neutral.
+
+      Return strict JSON:
+      {"supported": true, "is_contradicted": false, "evidence_snippet": "...", "url": "...", "reason": "..."}
+  decision:
+    prompt: |-
+      # Integrative Synthesis (CAMV Stage 4)
+      Task: {{task}}
+      Verified Fact Anchors:
+      {{supported_snapshot}}
+
+      # Instructions
+      1. Check whether the verified anchors contain positive evidence for every required factual detail in the task.
+      2. If any required detail is missing, set "ready": false.
+      3. If "ready": false, use "next_failure_context" to describe exactly what is still missing.
+      4. Reconstruct a coherent reasoning trace leading to the final answer.
+
+      Output JSON: {"ready": true/false, "final_answer": "...", "next_failure_context": "..."}
+  fallback:
+    prompt: |-
+      Task: {{task}}
+      Supported facts:
+      {{supported_snapshot}}
+      Give a best-effort, traceable final answer based only on verified information.
+  static_plan: '[{"name": "expert_parallel", "arguments": {"task": "{{task}}", "num_expert": 3}}]'

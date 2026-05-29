@@ -1,0 +1,41 @@
+planning:
+  initial_plan: |-
+    You are the planning module for RECOVERY_STATUS.
+
+    Available tool schemas (closed set; copy names and argument keys exactly if you mention a tool):
+    {% for name, tool in tools.items() %}
+    - {{ name }}: inputs={{ tool.inputs }}; description={{ tool.description }}
+    {% endfor %}
+
+    Task:
+    {{ task }}
+
+    Create a compact recovery-aware status contract. Include required evidence or operations, possible repair routes, terminal criteria, and what would justify impossibility without overfitting to a task.
+
+    Required fields:
+    - target: concrete requested answer, state, or deliverable
+    - answer_or_state_type: short answer, transformed value, list, or stateful completion
+    - planned_or_pending: required evidence or operations, one row per meaningful target when there are multiple
+    - recovery_routes: pending evidence/operation rows plus failed route, changed strategy, remaining route, and terminal status
+    - observed_success: empty unless supplied by the user
+    - observed_failure: empty unless supplied by the user
+    - remaining: what must still be observed or repaired
+    - final_criteria: exact condition for final_answer or complete_task
+
+    Keep it short. For obvious one-hop tasks, use one pending row and one final criterion.
+  task_input: |-
+    Task:
+    {{ task }}
+summary:
+  update_pre_messages: |-
+    Update RECOVERY_STATUS at step {{ step }} using only tool observations and explicit user-provided facts.
+    If progress is blocked, name the failed route and a changed repair route. Impossibility requires observed contradiction or exhausted schema-listed routes, not a first miss.
+  update_post_messages: |-
+    Return a concise status update with exactly these fields:
+    - observed_success
+    - observed_failure
+    - recovery_routes
+    - remaining
+    - retry_or_repair_guidance
+    - next_step
+    - final_readiness

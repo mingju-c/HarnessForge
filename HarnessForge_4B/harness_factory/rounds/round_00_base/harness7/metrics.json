@@ -1,0 +1,19 @@
+{
+  "num_tasks": 80,
+  "answer_correct": 0.2,
+  "has_valid_answer": 1.0,
+  "path_score": 0.3796,
+  "average_actions": 1.0375,
+  "average_tool_calls": 4.1125,
+  "prompt_tokens_total": 292308,
+  "completion_tokens_total": 36178,
+  "tokens_total": 328486,
+  "prompt_tokens_avg": 3653.85,
+  "completion_tokens_avg": 452.23,
+  "tokens_avg": 4106.07,
+  "runtime_total_min": 83.65,
+  "runtime_avg_sec": 62.74,
+  "harness_name": "harness7",
+  "framework_name": "dynamic_cheatsheet",
+  "source_result_file": "output/toolhop_round1_harness7/toolhop_flash_searcher_flash_searcher_dynamic_cheatsheet_local_qwen3-aevolve_closed_results.jsonl"
+}

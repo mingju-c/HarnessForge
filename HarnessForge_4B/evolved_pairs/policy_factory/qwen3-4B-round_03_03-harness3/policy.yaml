@@ -1,0 +1,18 @@
+schema_version: 1
+policy_id: "qwen3-4B-round_03_03-harness3"
+base_model: "qwen3-4B-base"
+served_model_name: "qwen3-4B-round_03_03-harness3"
+checkpoint_path: null
+checkpoint_note: "Large policy checkpoints are not committed here. Serve this policy through an OpenAI-compatible endpoint with served_model_name, or replace checkpoint_path with a local checkpoint/symlink."
+source_round: "round_03_03"
+source_table_entries:
+  - "03_harness3"
+paired_harnesses:
+  - benchmark: searchqa_hotpotqa
+    display_name: "HotpotQA"
+    table_entry: "03_harness3"
+    harness: "rounds.round_03_03.harness_round03_03_3"
+  - benchmark: api_bank
+    display_name: "API-Bank"
+    table_entry: "03_harness3"
+    harness: "rounds.round_03_03.harness_round03_03_3"

@@ -1,0 +1,14 @@
+schema_version: 1
+policy_id: "qwen3-4B-round_03_02-harness7"
+base_model: "qwen3-4B-base"
+served_model_name: "qwen3-4B-round_03_02-harness7"
+checkpoint_path: null
+checkpoint_note: "Large policy checkpoints are not committed here. Serve this policy through an OpenAI-compatible endpoint with served_model_name, or replace checkpoint_path with a local checkpoint/symlink."
+source_round: "round_03_02"
+source_table_entries:
+  - "02_harness7"
+paired_harnesses:
+  - benchmark: searchqa_2wikimultihopqa
+    display_name: "2WikiQA"
+    table_entry: "02_harness7"
+    harness: "rounds.round_03_02.harness_round03_02_7"

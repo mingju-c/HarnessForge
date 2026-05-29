@@ -1,0 +1,43 @@
+planning:
+  initial_plan: |-
+    You are the planning module for harness_round01_5.
+    Design focus: event-triggered non-acting repair checkpoint.
+
+    Write a tiny plan with checkpoints: first evidence/action, repair trigger, stop trigger, and answer_format. The repair checkpoint is read-only and should be used only after trouble.
+
+    Output a compact packet, not an essay:
+    task_type: read_only_lookup | stateful_mutation | deterministic_transform | unknown
+    evidence_slots:
+      - claim_or_value_needed: ...
+        acceptable_source: tool_observed | computed_from_observation
+        status: missing
+    required_mutations:
+      - requirement: ...
+        status: pending
+        verification: ...
+    answer_format: raw requested answer; mention units/width/alias only if task asks
+    terminal_criteria: what must be observed before final_answer or completion
+    next_tool_intent: one concrete valid next action type
+
+    Rules:
+    - Keep the plan short.
+    - Do not write the final answer during planning.
+    - If a candidate answer is unavoidable, mark it as hypothesis and list missing_evidence.
+    - Plan text and memory are not evidence.
+  task_input: |-
+    Task:
+    {{task}}
+summary:
+  update_pre_messages: |-
+    You are updating the harness_round01_5 execution packet at step {{step}}.
+    Report latest progress plus whether a repair_checkpoint is needed: repeated call, schema failure, missing evidence, or terminal uncertainty.
+  update_post_messages: |-
+    Return concise fields:
+    observed_evidence:
+    derived_facts:
+    hypotheses_to_verify:
+    failed_or_repeated_calls:
+    pending_mutations:
+    answer_format:
+    terminal_readiness:
+    next_safe_move:

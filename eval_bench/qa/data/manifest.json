@@ -1,0 +1,30 @@
+{
+  "version": 1,
+  "source": "AgentGym SearchQA / RUC-NLPIR FlashRAG_datasets",
+  "blacklist": "data/mixeddata/blacklists/agentgym_searchqa_offline_1000.seed_42.jsonl",
+  "dedupe": {
+    "ids": 996,
+    "questions": 1000,
+    "source_index": 1000
+  },
+  "requested_count_per_source": 150,
+  "seed": 42,
+  "offline": true,
+  "allow_train_fallback": false,
+  "retrieve_dir": "eval_bench/qa/retrieve_data",
+  "sources": {
+    "hotpotqa": {
+      "available_rows": 7405,
+      "split": "local_dev",
+      "selected_rows": 150,
+      "jsonl": "hotpotqa.jsonl"
+    },
+    "2wikimultihopqa": {
+      "available_rows": 12576,
+      "split": "local_dev",
+      "selected_rows": 150,
+      "jsonl": "2wikimultihopqa.jsonl"
+    }
+  },
+  "missing_sources": {}
+}

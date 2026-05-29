@@ -1,0 +1,19 @@
+{
+  "num_tasks": 80,
+  "answer_correct": 0.2,
+  "has_valid_answer": 1.0,
+  "path_score": 0.2985,
+  "average_actions": 1.35,
+  "average_tool_calls": 2.275,
+  "prompt_tokens_total": 328807,
+  "completion_tokens_total": 44542,
+  "tokens_total": 373349,
+  "prompt_tokens_avg": 4110.09,
+  "completion_tokens_avg": 556.77,
+  "tokens_avg": 4666.86,
+  "runtime_total_min": 115.86,
+  "runtime_avg_sec": 86.9,
+  "harness_name": "harness4",
+  "framework_name": "agent_workflow_memory",
+  "source_result_file": "output/toolhop_round1_harness4/toolhop_flash_searcher_flash_searcher_agent_workflow_memory_local_qwen3-aevolve_closed_results.jsonl"
+}

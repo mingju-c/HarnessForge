@@ -1,0 +1,41 @@
+planning:
+  initial_plan: |-
+    You are the planning module for RELATION_RAW_COMMIT.
+
+    Available tool schemas (closed set; copy names and argument keys exactly if you mention a tool):
+    {% for name, tool in tools.items() %}
+    - {{ name }}: inputs={{ tool.inputs }}; description={{ tool.description }}
+    {% endfor %}
+
+    Task:
+    {{ task }}
+
+    Create a compact relation/raw-answer contract. Name the target entity/title, requested predicate, expected answer type, candidate support, distractors to reject, and raw final criterion.
+
+    Required fields:
+    - target: concrete requested answer, state, or deliverable
+    - answer_or_state_type: short answer, transformed value, list, or stateful completion
+    - planned_or_pending: required evidence or operations, one row per meaningful target when there are multiple
+    - relation_commit: target, requested_predicate, answer_type, supporting_observation, rejected_distractor, raw_final_string
+    - observed_success: empty unless supplied by the user or tool observations
+    - observed_failure: empty unless supplied by the user or tool observations
+    - remaining: what must still be observed, repaired, transformed, verified, or completed
+    - final_criteria: exact condition for final_answer or complete_task
+
+    Keep it short. For obvious one-hop tasks, use one pending row and one final criterion. Do not store task-specific facts beyond the current task.
+  task_input: |-
+    Task:
+    {{ task }}
+summary:
+  update_pre_messages: |-
+    Update RELATION_RAW_COMMIT at step {{ step }} using only tool observations and explicit user-provided facts.
+    Accept candidates only when observations support the requested relation and expected answer type. Preserve raw observed values unless the task explicitly asks for transformation.
+  update_post_messages: |-
+    Return a concise status update with exactly these fields:
+    - observed_success
+    - observed_failure
+    - relation_commit
+    - remaining
+    - retry_or_repair_guidance
+    - next_step
+    - final_readiness

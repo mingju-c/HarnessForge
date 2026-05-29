@@ -1,0 +1,438 @@
+# Stage 3 Prompt Template
+# Purpose: generate one production-ready harness from localization + improvement direction reports.
+prompt_template: |
+  ## Stage 3 – Harness Generation
+
+  ### Objective
+  Build one creative but evolutionary, production-grade harness candidate that improves the current winner by following
+  the module-localized diagnosis and the improvement direction brief.
+  The generated harness must be a complete local harness bundle that can be placed under:
+  `harness_factory/rounds/{target_round}/{candidate_name}/`
+  Each generated harness candidate must be independent and self-contained. It may learn from the winner and selected
+  examples, but it must not depend on files from sibling candidates, previous generated candidates, or mutable external
+  harness directories at runtime.
+  The generator should implement concrete module-level repairs, not produce another analysis report or a from-scratch
+  unrelated harness.
+  ---
+  ### Context
+  **Harness Integration**:
+  A harness is composed of:
+  - `builder.py` — wires the harness and exposes `build_agent_from_context(context)`
+  - `__init__.py` — exports harness constants and build entry point
+  - `Description.md` — explains the harness design
+  - `planning_module/provider.py` — planning implementation
+  - `action_module/provider.py` — action / tool-use implementation, including concrete agent collaboration / orchestration
+  - `memory_module/provider.py` — memory provider or memory wrapper
+  **Core Agent Constraint**:
+  The benchmark runner, backend model, dataset, evaluator, and outer agent loop are fixed unless the local harness
+  examples clearly show an approved extension point. The harness may evolve internally through planning behavior,
+  action behavior, memory guidance, and simple interfaces between them.
+  **Module Ownership**:
+  - Planning owns decomposition, plan topology, progress state, verification questions, evidence-chain intent,
+    replan triggers/timing, milestone gates, and commit criteria.
+  - Action owns concrete agent collaboration / orchestration, agent topology, tool selection, tool-call arguments,
+    schema preflight/repair, observation handling, retry/stop policy, aggregation/arbitration, and final-answer submission.
+  - Memory owns compact reusable guidance, prior-case reminders, memory encoding, storage scope/format,
+    read/retrieval timing, routing, update/write policy, and ingestion.
+  - Builder owns wiring, constants, metadata, provider connection, and harness import compatibility.
+  - Interfaces should be simple and explicit. Use them only when one module must pass state or guidance to another.
+  ---
+  ### Reference Materials
+  **Winner / Current Best Harness**:
+  `{winner_harness_name}`
+  **Winner Harness Template / Source**:
+  {winner_harness_template}
+  **Stage 1 Module Localization Report**:
+  Review this carefully. It is authoritative for root-cause ownership.
+  {module_localization_report}
+  **Stage 2 Improvement Direction Brief**:
+  Follow this as the direct design brief.
+  {improvement_direction_brief}
+  **Selected Harness Examples**:
+  Use these as few-shot references. Borrow targeted module mechanisms only.
+  {selected_harness_examples}
+  **Existing Harness Names**:
+  The generated candidate must not reuse any existing harness name.
+  {existing_harness_names}
+  ---
+  ### Core Requirements
+
+  #### 1. Evidence-Grounded Evolution
+  - Build from the current winner and the Stage 2 blueprint.
+  - Treat the winner as the base system to evolve. Do not discard its architecture, contracts, or useful behavior.
+  - Implement the top 2-4 highest-leverage directions.
+  - Preserve winner behaviors explicitly marked as useful.
+  - Be creative within the localized repair space: adapt, recombine, or lightly extend mechanisms when they directly serve
+    the diagnosis and remain compatible with the winner's harness shape.
+  - Do not add complexity unrelated to the diagnosed failures.
+  - Do not make cosmetic-only changes.
+  - Do not copy peer harnesses wholesale.
+
+  #### 2. Module-Localized Repairs
+  Every significant code or prompt change must map to one of:
+  - Planning repair
+  - Action repair
+  - Memory repair
+  - Builder/wiring repair
+  - Cross-module interface repair
+  If a failure is assigned to Action in the Stage 1 report, do not solve it only by adding planning text.
+  If a failure is assigned to Memory, do not solve it by making the action loop more complex unless the brief asks for an interface.
+
+  #### 3. Design-Space Deliberation Before Coding
+  Before writing the harness files, choose a concrete design point by inspecting the Stage 1 diagnosis, Stage 2 brief,
+  winner source, and selected examples. Do not default to only longer prompts or a renamed winner. Also do not invent a
+  completely new system that ignores the winner. The generated harness should vary the internal mechanisms that the
+  diagnosis makes relevant while remaining a recognizable evolution of the winner.
+  Consider these module-specific design dimensions and implement the relevant ones explicitly:
+  - Planning: plan topology (linear checklist, staged DAG, tree of subtasks, verifier-gated loop, or other local pattern),
+    decomposition granularity, progress-state representation, evidence slots, replan triggers, replan timing, stop/commit
+    criteria, and Planning -> Action status handoff.
+  - Memory: encoding format (rules, key-value records, schema, compact episodic notes, or phase tags), storage location
+    and scope, retrieval/read timing, routing to Planning or Action, update/write timing, deduplication, forgetting/noise
+    control, and fallback behavior when no useful memory exists.
+  - Action: agent topology (single executor, coordinator-worker, verifier-repairer, committee, parallel workers, or direct
+    tool executor), role prompts, handoff protocol, tool-call construction, schema preflight, observation parsing, retry
+    and repair policy, aggregation/arbitration, canonicalization, and final-answer submission.
+  For each selected dimension, make the implementation concrete in provider code, provider prompts, builder wiring, or a
+  small explicit cross-module interface. Creative mechanisms are encouraged when they are local, testable, and grounded in
+  Stage 1/Stage 2 evidence. The `Module Change Map` must name the chosen mechanism, not just the affected file.
+  If a dimension is intentionally left unchanged, preserve the winner behavior and state that preservation in the map.
+
+  #### 4. Production-Ready Implementation
+  The generated harness must:
+  - be importable
+  - be executable in the local harness factory without manual surgery
+  - be self-contained within its own candidate directory except for stable shared framework imports
+  - expose `build_agent_from_context(context)`
+  - keep local harness factory conventions
+  - include robust fallbacks for missing optional inputs
+  - instantiate without missing imports, missing symbols, or incompatible constructor signatures
+  - survive a static syntax/import check and a minimal build-agent smoke check in principle
+  - avoid hard-coded benchmark answers
+  - avoid item-specific logic
+  - avoid hidden dependencies
+  - avoid runtime imports from other round candidates or copied absolute candidate paths
+  - avoid syntax errors
+  - be understandable to future maintainers
+
+  #### 5. Simplicity Bias
+  Prefer the smallest coherent harness that implements the brief.
+  Good:
+  - direct single-executor action with schema-aware repair
+  - concise planning state with explicit commit checklist
+  - compact memory reminders for recurring finalization failures
+  - simple Planning -> Action status note
+  Bad:
+  - broad multi-agent hierarchy with no evidence need
+  - heavy graph memory when the failure is final-answer formatting
+  - adding new orchestration layers
+  - adding many helper abstractions that do not map to the diagnosis
+  ---
+  ### Technical Conventions
+
+  #### Local Harness Bundle
+  The output should define one candidate directory:
+  `harness_factory/rounds/{target_round}/{candidate_name}/`
+  Candidate bundles are independent units. Do not require changes to the winner harness, peer harnesses, harness
+  examples, or other generated candidates. Shared imports from the stable framework packages such as `Agents.*`,
+  `module_action.*`, `module_planning.*`, and `module_memory.*` are allowed; sibling-candidate imports are not.
+  Required files:
+  - `__init__.py`
+  - `builder.py`
+  - `Description.md`
+  - `planning_module/provider.py`
+  - `action_module/provider.py`
+  - `memory_module/provider.py`
+  Optional files are allowed only when necessary:
+  - prompt YAML files under module prompt directories
+  - small helper modules under a module directory
+  - tests or smoke-check notes
+
+  #### Builder Contract
+  `builder.py` should follow the local harness pattern and define:
+  ```python
+  HARNESS_NAME = "..."
+  PLANNING_SYSTEM = "..."
+  ACTION_SYSTEM = "..."
+  DEFAULT_BENCH_TYPE = ...
+  DEFAULT_MEMORY_SYSTEM = "..."
+  PAIRING_REASON = "..."
+  def prepare_context(context):
+      ...
+  def build_agent_from_context(context):
+      ...
+  ```
+  It should:
+  - set `context.project_root` to the candidate directory
+  - pass `PlanningClass` through `context.kwargs` when the action provider expects it
+  - set `agent.planning_system`, `agent.action_system`, `agent.harness_name`, and `agent.harness_metadata`
+  - bind available tool references if the winner template does so
+  - avoid breaking existing `ActionContext` usage
+
+  #### `__init__.py` Contract
+  Export:
+  ```python
+  HARNESS_NAME
+  PLANNING_SYSTEM
+  ACTION_SYSTEM
+  DEFAULT_BENCH_TYPE
+  DEFAULT_MEMORY_SYSTEM
+  PAIRING_REASON
+  build_agent_from_context
+  ```
+
+  #### Planning Provider Contract
+  `planning_module/provider.py` should export:
+  ```python
+  from module_planning.base_planning import BasePlanning
+  PLANNING_SYSTEM = "..."
+  PLANNING_MODULE = "..."
+  class PlanningProvider(BasePlanning):
+      def __init__(self, model, tools, prompt_templates, memory, logger):
+          ...
+      def topology_initialize(self, task):
+          ...
+      def adaptation(self, task, step, write_memory_to_messages):
+          ...
+  PlanningClass = PlanningProvider
+  ```
+  It should inherit from or remain compatible with the local planning base class used in examples.
+  `topology_initialize` is the main place to change initial plan topology, decomposition granularity, evidence slots,
+  milestone gates, and initial Planning -> Action handoff text. `adaptation` is the main place to change progress-state
+  summaries, replan triggers/timing, verification questions, stalled-progress handling, memory-guidance use, and
+  stop/commit criteria. Small helper methods are allowed when they make these mechanisms explicit.
+  Planning may implement:
+  - concise initial planning
+  - explicit plan topology selection, such as checklist, staged DAG, tree, or verifier-gated loop
+  - decomposition granularity control
+  - explicit known / unknown / next state
+  - evidence-slot tracking and milestone gates
+  - progress summaries
+  - verification questions
+  - replan triggers and replan timing after failed tools, contradictions, missing evidence, verifier failure, or stalled progress
+  - commit criteria
+  - Planning -> Action status notes or compact task packets
+  - memory-guidance integration with clear fallback behavior
+  Planning should not directly call benchmark tools unless the local architecture already supports that.
+
+  #### Action Provider Contract
+  `action_module/provider.py` should export:
+  ```python
+  from module_action.base_action import ActionContext, BaseActionProvider
+  ACTION_SYSTEM = "..."
+  ACTION_MODULE = "..."
+  class ActionProvider(BaseActionProvider):
+      def build_affordance(self, bench_type, context: ActionContext):
+          ...
+      def build_specification(self, context: ActionContext, tools):
+          ...
+      def build_organization(self, context: ActionContext, tools):
+          ...
+
+      # Optional helper methods may implement the selected Action mechanisms.
+      ...
+  def get_provider():
+      return ActionProvider()
+  ```
+  It should remain compatible with the local `BaseActionProvider` and tool-loading conventions.
+  The inherited `build(context)` method normally handles reset, affordance construction, specification setup, and
+  organization construction. Override `build` only if the winner/examples require it, and preserve that lifecycle.
+  Action provider responsibilities should be localized as follows:
+  - `build_affordance`: choose and normalize available benchmark tools, subagent tools, reasoning tools, and strict-tool behavior.
+  - `build_specification`: set prompt templates, prompts type, role specifications, tool-call schemas, validation/repair policy,
+    retry/stop limits, and any compact shared state used by the organization.
+  - `build_organization`: instantiate the primary `ToolCallingAgent`, coordinator, workers, verifier, repairer, direct executor,
+    or committee using `create_agent`, `create_subagent`, and `create_subagent_tool` when appropriate.
+  - helper methods: keep observation parsing, tool-call preflight, arbitration, canonicalization, and final-answer checks small,
+    explicit, and tied to Stage 1/Stage 2 evidence.
+  Action may implement:
+  - single-agent direct execution
+  - coordinator-worker execution
+  - verifier-repairer execution
+  - debate / committee execution
+  - parallel worker execution, only when Stage 2 justifies the added cost
+  - explicit agent topology and role assignment
+  - role prompts and handoff protocol for collaborating agents
+  - aggregation or arbitration of multiple agent outputs
+  - prompt templates for schema-aware tool usage and tool-call argument construction
+  - schema preflight, validation, and repair before tool execution
+  - observation parsing, summarization, and error classification
+  - bounded retry or repair behavior
+  - stop policy when tools are exhausted or evidence is sufficient
+  - final-answer commit discipline
+  - canonicalization checks
+  - lightweight wrappers around existing action behavior
+  Do not hard-code tool names unless they are general benchmark tools exposed by the local environment and the examples already depend on them.
+
+  #### Memory Provider Contract
+  `memory_module/provider.py` should export a memory provider compatible with the local `module_memory` interfaces.
+  ```python
+  from module_memory.base_memory import BaseMemoryProvider
+  from module_memory.memory_types import MemoryRequest, MemoryResponse, MemoryType, TrajectoryData
+  MEMORY_SYSTEM = "..."
+  MEMORY_MODULE = "..."
+  DEFAULT_MEMORY_SYSTEM = MEMORY_SYSTEM
+  class MemoryProvider(BaseMemoryProvider):
+      def __init__(self, config=None):
+          ...
+      def initialize(self) -> bool:
+          ...
+      def provide_memory(self, request: MemoryRequest) -> MemoryResponse:
+          ...
+      def take_in_memory(self, trajectory_data: TrajectoryData) -> tuple[bool, str]:
+          ...
+
+      # Optional helper methods may implement encoding, retrieval, ranking, routing, and updates.
+      ...
+  MemoryClass = MemoryProvider
+  ```
+  The generator may inspect memory examples under:
+  `harness_factory/module_memory/providers`
+  Borrow the most suitable compatible memory mechanisms from these examples when they help implement the Stage 2 memory
+  direction. Use them as references for APIs, storage patterns, phase handling, retrieval/ranking, update/write policy,
+  and fallbacks. Do not blindly replace the harness memory with a copied provider unless Stage 2 explicitly calls for
+  that exact mechanism.
+  Memory provider responsibilities should be localized as follows:
+  - `__init__`: define memory type, config defaults, storage paths/scope, encoding format, limits, and any in-memory buffers.
+  - `initialize`: load or create state, migrate compatible local files if needed, and fail softly when optional state is absent.
+  - `provide_memory`: decide read/retrieval timing from `MemoryRequest.status`, route guidance to Planning/Action via concise
+    `MemoryResponse` items, rank/deduplicate memories, and return an empty safe response when nothing is useful.
+  - `take_in_memory`: encode and store reusable lessons from trajectory data, update existing records, suppress noisy writes,
+    and return a clear success/status message.
+  Memory may:
+  - wrap or subclass an existing memory provider
+  - inject compact phase-aware guidance
+  - define an encoding format for reusable lessons, such as rule cards, key-value records, compact episodic notes, or phase tags
+  - choose storage scope and format, including in-memory, context-attached, file-backed, or wrapper-level stores when supported locally
+  - read/retrieve memory at explicit times, such as before planning, before tool execution, before verification, or before finalization
+  - route memory differently to Planning and Action when their needs differ
+  - update memory after errors, successful tool sequences, verifier failures, or final-answer corrections
+  - deduplicate, rank, or suppress noisy memories
+  - provide finalization reminders and fallback guidance when retrieval is empty
+  If Stage 2 does not ask for memory internals, keep memory simple and lightweight.
+
+  #### Imports
+  Prefer imports already used in the winner or selected harness examples.
+  Do not redefine local base types when they can be imported from:
+  - `Agents.*`
+  - `module_action.*`
+  - `module_planning.*`
+  - `module_memory.*`
+  Keep imports robust and avoid optional external packages unless already present in the project.
+  ---
+  ### Naming Rules
+  The generated candidate must have a new identity.
+  - **Candidate Directory:** lowercase_with_underscores
+  - **HARNESS_NAME:** same as candidate directory
+  - **Planning System:** lowercase_with_underscores
+  - **Action System:** lowercase_with_underscores
+  - **Memory System:** lowercase_with_underscores
+  - **Class Names:** PascalCase
+  Do not reuse or slightly rename existing harness names.
+  Good names should describe the actual design, for example:
+  - `closure_guard_harness`
+  - `schema_aware_direct_harness`
+  - `checkpointed_react_harness`
+  Choose a name that matches the Stage 2 blueprint.
+  ---
+  ### Implementation Standards
+
+  #### Must Have
+  - Complete file contents for every required file
+  - Consistent constants across builder, providers, and description
+  - Clear module-level comments only where helpful
+  - Production-safe fallback behavior
+  - Executable imports under the expected harness package path
+  - Constructor signatures compatible with the local base classes
+  - No undefined names, missing exports, or broken relative imports
+  - A plausible validation path: syntax check, import check, provider instantiation, and build-agent smoke check
+  - No benchmark answer leakage
+  - No unused grand architecture
+  - No dependency on unavailable files
+
+  #### Should Have
+  - concise code
+  - direct mapping from Stage 2 directions to implementation
+  - explicit preservation of winner strengths
+  - small helper functions for nontrivial logic
+  - meaningful `Description.md`
+
+  #### Must Avoid
+  - vague placeholder code
+  - TODO-only implementation
+  - copying analysis text into runtime prompts verbatim when it is too long
+  - massive prompt bloat
+  - fragile string hacks tied to specific item IDs
+  - broad parallelism unless Stage 2 explicitly selected it
+  - non-executable pseudo-code
+  - code that only works after unspecified manual edits
+  ---
+  ### Output Format
+  Output **only one harness candidate**.
+  The candidate must be an independent bundle, not a patch against the winner or a dependent extension of another
+  generated harness.
+  Use Markdown with exactly these sections.
+  ---
+  ## Harness Information
+  Use bolded key-value pairs:
+  **Candidate Name**: value
+  **Target Path**: harness_factory/rounds/{target_round}/{candidate_name}
+  **Planning System**: value
+  **Action System**: value
+  **Memory System**: value
+  **Design Summary**: one concise paragraph
+  ---
+  ## Module Change Map
+  Provide a Markdown table with exactly these columns:
+  `Module | Stage 1 Failure Addressed | Stage 2 Direction Followed | Key Implementation Choice | Preserved Winner Behavior`
+  ---
+  ## Harness Files
+  Provide each file as:
+
+  ### `relative/path/from/candidate/root`
+  ```python
+  # complete file content
+  ```
+  For `Description.md`, use:
+  ```markdown
+  # complete file content
+  ```
+  Required file blocks:
+  - `__init__.py`
+  - `builder.py`
+  - `Description.md`
+  - `planning_module/provider.py`
+  - `action_module/provider.py`
+  - `memory_module/provider.py`
+  If optional files are included, place them after required files and explain why in `Description.md`.
+  ---
+  ## Validation Notes
+  Use flat bullets:
+  - import path to test
+  - expected smoke-check command if known
+  - static checks that should pass
+  - runtime construction checks that should pass
+  - likely failure modes for Phase 4 validation
+  - assumptions about local dependencies
+  - any risk that remains
+  ---
+  ## Final Checklist
+  Use flat bullets only.
+  Include:
+  - unique candidate name
+  - candidate is independent and self-contained
+  - required files present
+  - builder exports correct entry point
+  - module constants consistent
+  - harness is intended to be executable without manual repair
+  - imports and provider exports are complete
+  - Stage 1 top failures addressed
+  - Stage 2 borrow / avoid constraints followed
+  - no hard-coded answers
+  - no whole-harness copy
+  - no unnecessary architecture expansion
+  ---
+  ### Final Reminder
+  The generated harness should be ambitious in completeness and creative in local mechanisms, but conservative in overall
+  architecture.
+  It should feel like a precise module-level evolution of the current winner, not a new unrelated system.

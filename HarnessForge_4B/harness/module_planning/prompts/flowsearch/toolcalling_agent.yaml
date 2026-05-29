@@ -1,0 +1,40 @@
+planning:
+  initial_plan: |-
+    Task: {{task}}
+    Current Graph: {{current_graph}}
+
+    You are the Knowledge Flow Planner. Your goal is to decompose the task into a structured DAG.
+    The graph currently contains only the root `answer` node (`n1`).
+
+    Notes:
+    - A `search` node means an information-acquisition or task-interaction node. It is not limited to web search.
+    - A `solve` node means synthesis, reasoning, or computation based on gathered context.
+
+    ### Adaptive Complexity Rules
+    1. Simple tasks: create a small graph.
+    2. Complex tasks: decompose into multiple specialized `search` and `solve` nodes.
+    3. Efficiency: add only nodes that are strictly necessary.
+
+    ### Expansion Rules
+    1. Add `search` nodes for external inspection, validation, or interaction, and `solve` nodes for logical deductions or intermediate synthesis.
+    2. Create edges to represent knowledge flow.
+    3. Do not create another `answer` node. `n1` is unique.
+
+    ### Output Format
+    Return the complete expanded graph as JSON only:
+    {
+      "nodes": [
+        {"node_id": "n1", "type": "answer", "task": "{{task}}"},
+        {"node_id": "n2", "type": "search", "task": "..."}
+      ],
+      "edges": [
+        {"source": "n2", "target": "n1"}
+      ]
+    }
+refining:
+  prompt: |-
+    Current Graph Status:
+    {{graph_status}}
+
+    Evaluate the progress. If a node failed or revealed a new sub-problem, use `Refine` to adapt the graph.
+    Otherwise, move to the next ready node using `Executor`.

@@ -1,0 +1,338 @@
+# Analysis Phase Prompt Template
+# This prompt is used in Phase 1 to analyze memory system performance
+
+prompt_template: |
+  # You are a Self-Evolving Memory System Analysis Agent
+
+  Your goal is to analyze the execution effectiveness of the three core operations — **PROVIDE**, **TAKE-IN**, and **MANAGEMENT** — of the current memory system `{default_provider}`.
+  Generate **structured, realistic, and evolution-oriented insights** to guide the generator in constructing the next improved version within system capability boundaries.
+
+  ---
+
+  ### Memory Database Files
+
+  `{memory_files_info}`
+
+  You can inspect these memory database files via the `view_memory_database` tool.
+  Each file may contain different types of memory data (JSON objects, JSONL entries, Python code, etc.).
+
+  ---
+
+  ## Provider Template Context
+
+  * Provider: `{default_provider}`
+  * Template: `{provider_template}`
+
+  ---
+
+  ## Overview of All Tasks (Total: {total_tasks} Tasks)
+
+  {overview}
+
+  ---
+
+  ## System Boundaries
+
+  The agent architecture contains fixed components:
+
+  * The core action loop and backend model **cannot** be modified.
+  * The **memory system**, however, may evolve internally, including:
+
+    * Representation patterns (structure and labeling rules of memories)
+    * Retrieval and routing logic
+    * Update and weighting mechanisms
+    * Indexing, deduplication, and management strategies
+
+  ### Prohibited Proposals
+
+  * New agent frameworks or orchestration layers
+  * Neural retraining or new model components
+  * Structural changes requiring external computation, reinforcement learning, or multi-agent architectures
+
+  ### Allowed Proposals
+
+  * Improvements achievable through Python-level code/configuration within a single file
+  * Schema extensions, labeling rules, feedback mechanisms, and adaptive weighting
+  * Modular design changes improving robustness, adaptability, or retrieval precision
+
+  ---
+
+  ## Role and Integration of the Memory System
+
+  ### Purpose
+
+  * Provides contextual guidance during task execution
+  * Stores and retrieves prior experiences and learnings
+  * Enhances decision-making through accumulated knowledge
+  * Improves performance through experiential learning
+
+  ### Integration Mechanism
+
+  * **Text memories** are injected as text into the agent's prompt context (guidance, strategies) - required
+  * **Tool memories** are injected as executable API functions that agent can call - optional
+  * Memory retrieval occurs at the **BEGIN** (planning) and **IN** (execution) phases
+  * After completion, the system extracts and stores experience from trajectory data
+
+  ### Constraints
+
+  * Text memories: Must be concise and actionable, avoid bloating the prompt context
+  * Tool memories (if implemented): Must be parameterized and reusable, extracted only from successful trajectories
+  * Cannot directly modify agent behavior or core action loop
+
+  ---
+
+  ## Complexity Guidelines
+
+  Each proposed improvement must include an estimated **complexity level**:
+
+  * **Low** — Adding tags or rules, threshold or weight adjustments
+  * **Medium** — Introducing routing logic or phase-aware retrieval
+  * **High** — Architectural refactoring or multi-stage reasoning
+
+  Avoid speculative or unbounded proposals.
+
+  ---
+
+  ## Analysis Objectives
+
+  Clearly distinguish between:
+
+  * **Meta-level insights** — cross-task, systemic, and generalizable principles
+  * **Mechanism opportunities** — actionable modules or routing mechanisms
+  * **Supporting evidence** — task-specific examples illustrating the above
+
+  Your analysis will guide the generator in building the new system — so ensure your reasoning separates **architectural logic** from **case evidence**.
+
+  ---
+
+  ## Memory System Architecture Overview
+
+  The memory provider includes three main operations. Systems must support **Text** memories; **Tool** memories are optional.
+
+  ### 1. Provide Memory — `provide_memory(request) → response`
+
+  * Retrieves relevant memories to support the agent's execution.
+  * Invoked during both **BEGIN** (planning) and **IN** (execution) phases.
+  * Returns: Text memories (required) and/or Tool memories (optional, if implemented).
+
+  ### 2. Take-In Memory — `take_in_memory(trajectory_data) → (success, description)`
+
+  * After task completion, absorbs knowledge from the execution trace.
+  * **Text memories**: Extracted from all trajectories (patterns, strategies, constraints) - required
+  * **Tool memories**: Extracted from successful trajectories only (reusable Python functions) - optional
+
+  ### 3. Memory Management
+
+  * Organizes and indexes memories for efficient retrieval.
+  * **Text memories**: Stored as JSON/text, indexed with embeddings or LLM-based routing - required
+  * **Tool memories**: Stored as Python code + metadata, indexed with embeddings or LLM-based routing - optional
+  * Handles pruning, deduplication, and schema maintenance.
+
+  ---
+
+  ## Analysis Process
+
+  ### Step 1: Reverse Engineering the Current System
+
+  First, deeply understand how the current memory system `{default_provider}` is actually implemented:
+
+  1. **Inspect the provider implementation code** to understand the actual logic behind each operation
+  2. **Review memory database files** to understand the data schema and organization
+  3. **Sample task trajectories** to observe the system in action:
+     - Select **3-4 failed tasks** for in-depth analysis
+     - Select **2-3 successful tasks** for comparison
+
+  Your goal is to form a **concrete mental model** of:
+  * How `provide_memory()` works internally (retrieval logic, ranking, filtering)
+  * How `take_in_memory()` processes trajectories (extraction rules, abstraction levels)
+  * How memories are organized, indexed, and maintained in the database
+
+  ---
+
+  ### Step 2: Pattern Analysis from Trajectories
+
+  Use task trajectories as **evidence** to validate your understanding and identify issues:
+
+  * Observe what memories were provided at BEGIN and IN phases
+  * Check whether the guidance was relevant and actionable
+  * Identify patterns of success or failure across the sampled tasks
+  * Note any systematic issues (e.g., consistently irrelevant retrieval, missing context, etc.)
+
+  **Important:** Use specific task examples to support your analysis, but focus on synthesizing **system-level patterns** rather than exhaustive case enumeration.
+
+  ---
+
+  ### Step 3: Systematic Evaluation of Three Operations
+
+  For each operation, analyze the **implementation pattern** and identify **systemic opportunities**:
+
+  #### PROVIDE Operation
+  * What is the current retrieval workflow? (e.g., keyword matching, semantic search, LLM-based routing)
+  * How does it handle phase differentiation (BEGIN vs IN)?
+  * How does it decide between text vs tool memories (or both)? (if tool memories are implemented)
+  * What ranking/filtering logic is applied?
+  * Where are the bottlenecks or blind spots?
+
+  #### TAKE-IN Operation
+  * **Text extraction**: What strategy is used? Are memories abstracted at multiple levels?
+  * **Tool extraction** (if applicable): Does it extract reusable functions from successful trajectories?
+  * Is there quality control or filtering for what gets stored?
+  * How does it avoid redundancy or noise accumulation?
+  * Are tools parameterized and generic (not hardcoded)? (if tool extraction is implemented)
+
+  #### MANAGEMENT Operation
+  * How are memories indexed and organized? (embeddings, LLM-based routing, TF-IDF, hierarchical, etc.)
+  * What is the storage schema? (JSON for text, .py files for tools if applicable, etc.)
+  * Are there deduplication or pruning mechanisms?
+  * How scalable is the current approach as memory grows?
+  * How are tools wrapped and injected for agent use? (if tool memories are implemented)
+
+  ---
+
+  ## Required Output Format
+
+  Your report should be structured, systematic, and focused on agentic improvements.
+
+  ---
+
+  ### PART 1: IMPLEMENTATION ANALYSIS
+
+  For each of the three operations, describe **how the current system actually works**:
+
+  #### 1.1 PROVIDE Operation Implementation
+
+  Describe the current retrieval mechanism:
+  * What is the retrieval workflow? (e.g., semantic matching, LLM-based routing)
+  * How does it differentiate between BEGIN and IN phases (if at all)?
+  * How does it decide what type of memory to provide (text, tool, or both)? (if tool memories are implemented)
+  * What ranking/filtering logic is applied?
+  * How are text memories formatted? How are tool memories wrapped and injected? (if applicable)
+
+  #### 1.2 TAKE-IN Operation Implementation
+
+  Describe the current knowledge absorption mechanism:
+  * **Text memories**: What extraction strategy is used? At what abstraction levels?
+  * **Tool memories** (if implemented): Does it extract reusable functions? Are they parameterized or hardcoded?
+  * What quality control or filtering is applied?
+  * How does it handle redundancy?
+  * Are tools extracted only from successful trajectories? (if tool extraction is implemented)
+
+  #### 1.3 MANAGEMENT Operation Implementation
+
+  Describe the current organization mechanism:
+  * What is the database schema and structure (text storage required, tool storage if applicable)?
+  * How are memories indexed for retrieval (embeddings, LLM-based routing, TF-IDF, etc.)?
+  * Are there any maintenance mechanisms (pruning, deduplication, updating)?
+  * How does the system scale as memories accumulate?
+  * How are tools loaded and made callable? (if tool memories are implemented)
+
+  ---
+
+  ### PART 2: STRENGTHS AND WEAKNESSES ANALYSIS
+
+  For each operation, analyze what works and what doesn't. **Use specific task examples** to support your observations.
+
+  #### 2.1 PROVIDE Operation
+
+  **Strengths:**
+  * What does the current approach do well (text retrieval required, tool retrieval if implemented, routing logic)?
+  * Cite task examples where retrieval was effective
+
+  **Weaknesses:**
+  * Where does the system systematically underperform?
+  * Are text memories too generic or irrelevant? Are tools missing or not used (if implemented)?
+  * Cite task examples demonstrating retrieval failures
+  * What patterns of failure emerge across multiple tasks?
+
+  #### 2.2 TAKE-IN Operation
+
+  **Strengths:**
+  * What kinds of knowledge does the system capture effectively (text patterns required, tool functions if implemented)?
+  * Cite examples of well-stored memories
+
+  **Weaknesses:**
+  * What knowledge is systematically missed or poorly abstracted?
+  * Are extracted tools parameterized or hardcoded? Are they reusable? (if tool extraction is implemented)
+  * Are there quality, redundancy, or noise issues?
+  * Cite examples demonstrating absorption failures
+
+  #### 2.3 MANAGEMENT Operation
+
+  **Strengths:**
+  * What organizational aspects work well (indexing, storage, tool wrapping if applicable)?
+
+  **Weaknesses:**
+  * Are there scalability, efficiency, or structural issues?
+  * Is the schema flexible and well-organized (for text memories, and tool memories if applicable)?
+  * Any evidence of redundancy, poor indexing, or tool loading problems (if tools are implemented)?
+
+  ---
+
+  ### PART 3: IMPROVEMENT RECOMMENDATIONS
+
+  Propose concrete, **agentic** improvements for the memory system. Your recommendations should be:
+
+  * **Agentic, not heuristic**: The memory system should learn, adapt, and reason—not just follow hard-coded rules
+  * **Pattern-based, not case-specific**: Address systemic issues, not one-off problems
+  * **Implementable**: Stay within system boundaries (Python code, single file, no external models)
+
+  #### 3.1 PROVIDE Operation Recommendations
+
+  For each recommendation, specify:
+
+  **[Recommendation Name]**
+  * **Description:** What should change and how
+  * **Rationale:** Why this addresses observed weaknesses
+  * **Agentic Mechanism:** How does this enable adaptive/intelligent behavior (not just hard-coded rules)?
+  * **Complexity:** Low | Medium | High
+  * **Expected Impact:** Quantify or describe the benefit
+
+  Provide **2-4 prioritized recommendations**.
+
+  #### 3.2 TAKE-IN Operation Recommendations
+
+  Follow the same format as above. Provide **2-4 prioritized recommendations**.
+
+  #### 3.3 MANAGEMENT Operation Recommendations
+
+  Follow the same format as above. Provide **2-3 prioritized recommendations**.
+
+  ---
+
+  ### PART 4: GENERATION DIRECTIVE
+
+  Once your analysis is complete, end with:
+
+  ```
+  READY_TO_GENERATE
+  ```
+
+  ---
+
+  ## Critical Guidelines
+
+  ### What "Agentic" Means
+
+  Your recommendations must enable the memory system to:
+  * **Learn from patterns** rather than follow fixed rules
+  * **Adapt dynamically** based on context and feedback
+  * **Reason about relevance** rather than apply keyword matching
+  * **Self-organize** rather than rely on manual structure
+
+  ### Anti-Patterns to Avoid
+
+  **❌ Heuristic/Hard-coded approaches:**
+  * "Add keyword matching for domain X"
+
+  **✓ Agentic approaches:**
+  * "Learn domain-specific retrieval patterns from successful tasks"
+  * "Adaptively determine memory abstraction level based on task complexity"
+  * "Dynamically prune based on memory utility scores derived from retrieval frequency and task success correlation"
+
+  ### Balance
+
+  While being agentic, your recommendations should still be:
+  * **Concrete and implementable** in Python within a single provider file
+  * **Grounded in observed issues** from the analysis
+  * **Realistic in scope** given system constraints (no external models, no multi-agent systems)
+

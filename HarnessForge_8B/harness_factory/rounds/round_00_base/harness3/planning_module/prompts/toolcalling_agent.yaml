@@ -1,0 +1,14 @@
+planning:
+  initial_plan: |-
+    ### Guarded Task Augmentation
+    [OUTPUT INSTRUCTION]: Strictly provide ONLY the following fields. NO other text.
+    - Task: [Provide ONLY the core question description from {{task}}. DO NOT include any answers or findings from History.]
+    - History: {{ retrieved_knowledge if retrieved_knowledge else "None" }}
+    - Complexity: [Determine: Simple/Complex]
+    - Experts: PE: 1, ReAct: [1 if Simple, 2 if Complex; never more than 2]
+    - Guard: [Name the most important tool-schema/repetition risk and the stop condition.]
+
+    [STRICT RULE]: The 'Task' field must only reflect the user's request, NOT the results found in 'History'.
+    [RECOVERY RULE]: after a failed observation, the next strategy must repair arguments, switch tools, or stop if evidence is sufficient.
+    [STOP]: YOUR OUTPUT MUST END HERE.
+  task_input: 'Task: {{task}}'

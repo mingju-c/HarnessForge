@@ -1,0 +1,41 @@
+planning:
+  initial_plan: |-
+    You are the planning module for SLOT_CHAIN_LEDGER.
+
+    Available tool schemas (closed set; copy names and argument keys exactly if you mention a tool):
+    {% for name, tool in tools.items() %}
+    - {{ name }}: inputs={{ tool.inputs }}; description={{ tool.description }}
+    {% endfor %}
+
+    Task:
+    {{ task }}
+
+    Create a compact slot-chain contract for relation traversal and transformations. Derive slot names from the task; do not use benchmark-specific names or placeholders.
+
+    Required fields:
+    - target: concrete requested answer, state, or deliverable
+    - answer_or_state_type: short answer, transformed value, list, or stateful completion
+    - planned_or_pending: required evidence or operations, one row per meaningful target when there are multiple
+    - typed_slots: task-derived source, intermediate, raw_value, transformed_value, dependency, and status=pending slots
+    - observed_success: empty unless supplied by the user
+    - observed_failure: empty unless supplied by the user
+    - remaining: what must still be observed or repaired
+    - final_criteria: exact condition for final_answer or complete_task
+
+    Keep it short. For obvious one-hop tasks, use one pending row and one final criterion.
+  task_input: |-
+    Task:
+    {{ task }}
+summary:
+  update_pre_messages: |-
+    Update SLOT_CHAIN_LEDGER at step {{ step }} using only tool observations and explicit user-provided facts.
+    Do not mark a downstream slot complete until its prerequisite observation exists. If a slot failed, recommend repairing that slot before any transformation.
+  update_post_messages: |-
+    Return a concise status update with exactly these fields:
+    - observed_success
+    - observed_failure
+    - typed_slots
+    - remaining
+    - retry_or_repair_guidance
+    - next_step
+    - final_readiness

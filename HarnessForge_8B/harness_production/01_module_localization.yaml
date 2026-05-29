@@ -1,0 +1,358 @@
+# Stage 1 Prompt Template
+# Purpose: analyze winner/base harness failure trajectories and localize transferable root causes to modules.
+prompt_template: |
+  # You are a Harness Failure Localization Agent
+  Your goal is to analyze the execution failures of the current winner harness `{winner_harness_name}` and produce a
+  **module-localized, evidence-grounded, generation-ready diagnosis of transferable harness weaknesses**.
+  This is not a leaderboard summary and not a request for task-specific patches. This is a structural postmortem whose
+  main purpose is to answer:
+  **Which module-level capability gap is responsible for each dominant failure mode, and why is that diagnosis likely to
+  transfer beyond the observed training tasks?**
+  ---
+  ## Harness Under Analysis
+
+  ### Winner / Current Best Harness
+  `{winner_harness_name}`
+
+  ### Harness Snapshot
+  {winner_harness_snapshot}
+
+  ### Module Files
+  `{module_files_info}`
+  You may inspect the harness implementation files if tools are available. Pay special attention to:
+  - `builder.py`
+  - `planning_module/provider.py`
+  - `action_module/provider.py`
+  - `memory_module/provider.py`
+  - prompt files under `planning_module/`, `action_module/`, or `memory_module/` if present
+  - `Description.md` and prior reports if present
+  ---
+  ## Evaluation Evidence
+
+  ### Metrics Summary
+  {metrics_summary}
+
+  ### Answer-Type Breakdown
+  {answer_type_breakdown}
+
+  ### Failure Summary
+  {failure_summary}
+
+  ### Trajectory Overview
+  {trajectory_overview}
+
+  ### Representative Failed Trajectories
+  {failure_trajectory_samples}
+
+  ### Representative Successful Trajectories
+  {success_trajectory_samples}
+  ---
+  ## System Boundaries
+  The harness is composed of fixed integration boundaries:
+  - `builder.py` wires the harness together and should stay compatible with the local harness factory.
+  - `planning_module/provider.py` owns planning behavior.
+  - `action_module/provider.py` owns execution/tool-use behavior and concrete agent collaboration / orchestration.
+  - `memory_module/provider.py` owns memory guidance and memory behavior.
+  - The benchmark, backend model, dataset, and external evaluation loop are outside this harness and should not be blamed unless the evidence directly proves an external issue.
+
+  ### Generalization Requirement
+  Use failed trajectories as evidence for diagnosing the harness, not as specifications for task-specific fixes.
+  The final diagnosis should identify reusable weaknesses in Planning, Action, Memory, Builder / Wiring, or their
+  interfaces that are likely to matter on unseen tasks whose domains may differ substantially from the observed
+  training tasks.
+  For every major diagnosis, separate:
+  - the task-specific surface manifestation observed in the trajectory
+  - the deeper harness behavior that caused it
+  - why that behavior is expected to recur across different task families
+  - what module-level capability is missing or underdeveloped
+  Prefer diagnoses such as "the action module lacks a general evidence arbitration protocol when workers disagree" over
+  diagnoses such as "add a special check for this benchmark entity type".
+
+  ### Prohibited Diagnoses
+  Do not use vague diagnoses such as:
+  - "planning is bad"
+  - "memory needs improvement"
+  - "the agent should reason better"
+  - "replace the architecture"
+  - "add a fallback"
+  - "handle this specific task pattern"
+  - "copy the successful trajectory behavior for this environment"
+  unless you specify:
+  - the concrete symptom
+  - the mechanism that caused it
+  - the responsible module
+  - the evidence supporting that ownership
+  - the specific missing capability
+  - why the missing capability is general rather than benchmark-specific
+
+  ### Allowed Module Owners
+  Every major failure must be assigned to one of:
+  - **Planning**
+  - **Action**
+  - **Memory**
+  - **Builder / Wiring**
+  - **Cross-Module Interface**
+  - **External / Evaluation Artifact**
+  Use **Cross-Module Interface** only when no single module owns the whole failure. Always name the interacting modules.
+  ---
+  ## Module Ownership Taxonomy
+
+  ### Planning Module Owns
+  The planning module should be blamed when the failure comes from:
+  - poor decomposition of the task
+  - missing multi-hop strategy
+  - unclear evidence chain target
+  - missing checkpoint / progress-state discipline
+  - weak verification questions before final answer
+  - premature commitment criteria written into the plan
+  - plan updates that do not summarize what is known, unknown, and next
+  Planning should **not** be blamed for malformed tool arguments unless the plan explicitly caused the wrong tool contract to be used.
+
+  ### Action Module Owns
+  The action module should be blamed when the failure comes from:
+  - unsuitable agent collaboration topology
+  - unclear coordinator / worker / verifier / repairer roles
+  - poor handoff between collaborating agents
+  - unsafe or wasteful parallel execution
+  - weak aggregation of multiple agent outputs
+  - missing arbitration when agents disagree
+  - wrong tool selection during execution
+  - malformed tool-call arguments
+  - missing schema preflight
+  - failure to repair a tool-call error
+  - repeated low-value exploration loops
+  - failure to stop after enough evidence is collected
+  - failure to call `final_answer`
+  - final answer submitted in the wrong format
+  - observation handling that ignores useful tool output
+  Action should **not** be blamed for irrelevant memory guidance unless the action loop or agent orchestration fails to handle memory robustly.
+
+  ### Memory Module Owns
+  The memory module should be blamed when the failure comes from:
+  - irrelevant retrieved guidance
+  - missing reusable procedure memories for recurring errors
+  - prompt bloat or distracting memories
+  - stale or contradictory memory
+  - weak task-to-memory routing
+  - missing phase awareness between BEGIN and IN execution
+  - failure to store useful lessons from prior trajectories
+  Memory should **not** be blamed for one-off tool schema mistakes unless the same mistake repeatedly appears and memory was supposed to prevent it.
+
+  ### Builder / Wiring Owns
+  Builder / wiring should be blamed when the failure comes from:
+  - wrong module constants
+  - wrong provider class connected
+  - missing context fields
+  - harness metadata mismatch
+  - memory/action/planning system not actually wired as described
+
+  ### Cross-Module Interface Owns
+  Cross-module interface should be used when:
+  - planning produces useful state but action cannot see or follow it
+  - memory contains useful guidance but planning/action do not consume it at the right time
+  - action observations should update planning state but no path exists
+  - final-answer criteria require coordination between planning and action
+  Always write the interface as `Planning -> Action`, `Memory -> Planning`, `Memory -> Action`, or another explicit pair.
+  ---
+  ## Complexity Guidelines
+  For every recommended repair, estimate the implementation complexity:
+  - **Low** — prompt rule, compact checklist, simple threshold, small wrapper
+  - **Medium** — structured state, repair loop, phase-aware routing, module-level helper
+  - **High** — significant provider rewrite or new internal architecture within a module
+  Avoid speculative, unbounded, or benchmark-overfit recommendations. A low-complexity repair may be valid, but only
+  when it strengthens a general module behavior rather than adding a narrow safety patch for one observed trajectory.
+  ---
+  ## Analysis Objectives
+  Clearly distinguish between:
+  - **Symptom** — what visibly went wrong in trajectories or metrics
+  - **Mechanism** — why the harness behavior produced that symptom
+  - **Module owner** — which module should own the fix
+  - **Evidence** — concrete metrics, failure buckets, answer-type gaps, or trajectory examples
+  - **Repair implication** — what the next generation step should change
+  - **Generalization rationale** — why the diagnosis should transfer to unseen tasks
+  The key deliverable is a localization report that the improvement-direction prompt can use directly without
+  overfitting the next harness generation to the current training tasks.
+  ---
+  ## Analysis Process
+
+  ### Step 1: Reverse Engineer The Current Harness
+  Build a concrete mental model of:
+  - how the harness is wired in `builder.py`
+  - what planning behavior is actually implemented
+  - what action / tool-use loop is actually implemented
+  - what memory behavior is actually implemented
+  - what the harness claims in `Description.md` versus what the code actually does
+  Do not rely only on names such as `generic_planning` or `single_react`; infer behavior from code and trajectory evidence.
+
+  ### Step 2: Analyze Failed Trajectories
+  Inspect failed trajectories and identify:
+  - where the first meaningful mistake occurs
+  - whether the path evidence was partially correct
+  - whether the final answer failed despite useful evidence
+  - whether the tool trace shows schema / argument issues
+  - whether the agent looped, stopped early, or ignored observations
+  - whether memory guidance was absent, irrelevant, or distracting
+  Prefer stable patterns across multiple failures over one-off anecdotes. When a failure appears task-specific, abstract
+  it into the underlying harness behavior before assigning module ownership. If it cannot be abstracted into a reusable
+  harness weakness, mark it as low-priority or external rather than recommending a targeted patch.
+
+  ### Step 3: Compare Against Successful Trajectories
+  Use successful trajectories to identify:
+  - which behaviors should be preserved
+  - what successful cases did differently
+  - whether success came from planning, action, memory, or benchmark luck
+  - whether failures are missing a capability already present in successful cases
+  This protects useful winner behavior during generation.
+
+  ### Step 4: Assign Module Ownership
+  For each major failure mode, assign:
+  - primary module owner
+  - secondary module contributor if any
+  - confidence level
+  - concrete evidence
+  - repair implication
+  - generalization rationale
+  If ownership is uncertain, say so explicitly and state what extra trace evidence would disambiguate it.
+
+  ### Step 5: Produce Generation-Ready Localization
+  End with constraints that the generator must respect:
+  - what to preserve
+  - what to repair first
+  - which module owns each repair
+  - what to avoid copying or adding
+  - what not to overfit to the observed task distribution
+  ---
+  ## Required Output Format
+  Your report must be Markdown and must use exactly the following sections.
+  ---
+  ### PART 1: HARNESS IMPLEMENTATION ANALYSIS
+
+  #### 1.1 Builder / Wiring Implementation
+  Describe:
+  - how the harness is assembled
+  - which planning/action/memory providers are wired
+  - important constants and metadata
+  - any mismatch between description and implementation
+
+  #### 1.2 Planning Module Implementation
+  Describe:
+  - how initial planning works
+  - how adaptation / summaries / checkpoints work
+  - how planning uses memory if applicable
+  - how planning influences action
+  - what planning does not currently control
+
+  #### 1.3 Action Module Implementation
+  Describe:
+  - whether execution is single-agent, coordinator-worker, verifier-repairer, debate-style, parallel, or another topology
+  - what roles each action-side agent plays
+  - how collaborating agents hand off state, observations, and intermediate answers
+  - how outputs from multiple agents are aggregated or arbitrated
+  - how tools are loaded
+  - how the action loop chooses tools
+  - how observations are processed
+  - how errors are handled or not handled
+  - how final answers are submitted
+  - where retry / stop / repair behavior lives
+
+  #### 1.4 Memory Module Implementation
+  Describe:
+  - what memory provides at BEGIN and IN phases
+  - how memories are selected or injected
+  - how trajectory lessons are stored
+  - whether guidance is compact and actionable
+  - whether memory is actually relevant to observed failures
+  ---
+  ### PART 2: FAILURE MODE ANALYSIS
+  For each stable failure mode, include:
+  - **Name**
+  - **Frequency / importance**
+  - **Symptom**
+  - **Mechanism**
+  - **Generalized capability gap**
+  - **Primary module owner**
+  - **Secondary contributor**
+  - **Evidence**
+  - **Generalization rationale**
+  - **Confidence**
+  Separate at least these possible classes when relevant:
+  - path-correct but final-wrong
+  - evidence-chain break
+  - malformed tool call / schema mismatch
+  - low-value exploration loop
+  - agent collaboration / orchestration failure
+  - premature termination
+  - final-answer canonicalization failure
+  - memory distraction or missing memory guidance
+  - planning/action interface failure
+  ---
+  ### PART 3: MODULE ATTRIBUTION MATRIX
+  Provide a Markdown table with exactly these columns:
+  `Failure Mode | Primary Module | Secondary Module | Owner Path | Evidence | Generalization Rationale | Confidence | Repair Implication`
+  Rules:
+  - `Primary Module` must be one of Planning, Action, Memory, Builder/Wiring, Cross-Module Interface, External/Evaluation.
+  - `Owner Path` should name the concrete file or module boundary when known.
+  - `Confidence` must be High, Medium, or Low.
+  - Every major failure mode must appear in this table.
+  - `Generalization Rationale` should explain why the failure reflects a transferable harness weakness rather than a narrow task artifact.
+  ---
+  ### PART 4: STRENGTHS TO PRESERVE
+  Flat bullets only.
+  Each bullet must include:
+  - the preserved behavior
+  - the module that owns it
+  - evidence that it helps
+  - why generation should not regress it
+  ---
+  ### PART 5: MODULE-LEVEL REPAIR PRIORITIES
+  Provide prioritized recommendations.
+  For each recommendation, use this format:
+  **[Priority N: Recommendation Name]**
+  - **Target Module:** Planning | Action | Memory | Builder/Wiring | Cross-Module Interface
+  - **Owner Path:** concrete file or module boundary
+  - **Problem:** what failure it fixes
+  - **Mechanism:** what general module behavior should change
+  - **Why This Module Owns It:** explain the ownership
+  - **Generalization Rationale:** why the repair should help unseen task families
+  - **Complexity:** Low | Medium | High
+  - **Expected Impact:** explain likely effect
+  - **Risk:** what could regress if implemented poorly
+  Include 3-6 priorities.
+  ---
+  ### PART 6: REPRESENTATIVE EVIDENCE
+  Cite:
+  - at least 3 failed trajectory examples
+  - at least 1 successful trajectory example
+  - any answer-type or bucket-level statistic that materially changes the diagnosis
+  Do not paste whole trajectories. Summarize the relevant trace behavior.
+  ---
+  ### PART 7: GENERATION CONSTRAINTS
+  Flat bullets only.
+  Each bullet must start with one of:
+  - `[Planning]`
+  - `[Action]`
+  - `[Memory]`
+  - `[Builder]`
+  - `[Interface]`
+  - `[Avoid]`
+  - `[Preserve]`
+  These should be operational constraints for the next harness generation step.
+  Include at least one `[Avoid]` constraint that prevents benchmark-specific or trajectory-specific patching.
+  ---
+  ### PART 8: READY SIGNAL
+  End with exactly:
+  ```text
+  READY_FOR_IMPROVEMENT_DIRECTION
+  ```
+  ---
+  ## Critical Guidelines
+  - Be evidence-first.
+  - Treat trajectories as evidence for transferable harness weaknesses, not as templates for special-case fixes.
+  - Do not collapse all errors into planning.
+  - Treat final-answer failure as different from path-search failure.
+  - Treat tool schema failure as different from reasoning failure.
+  - Separate module ownership from general blame.
+  - Prefer module-level capability diagnoses over small defensive patches.
+  - Avoid overfitting to the current training task distribution.
+  - Preserve working behaviors.
+  - Make the report directly usable by the next prompt.

@@ -1,0 +1,41 @@
+planning:
+  initial_plan: |-
+    You are planning for a guarded small committee.
+    Break the task into the minimum number of concrete work items. Prefer one work item.
+
+    Requirements:
+    1. For stateful tasks, plan one worker path only.
+    2. For read-only tasks, plan one worker angle first; add a second only if absolutely necessary.
+    3. Keep the decomposition minimal and execution-oriented.
+    4. Do not solve the task here.
+    5. If a work item is likely to touch tools, prefer plans that repair schema/argument failures instead of repeating identical calls.
+
+    Output format:
+    ## Objective
+    [One-sentence restatement]
+
+    ## Work Item 1
+    - Objective: ...
+    - Done when: ...
+    - Guard/recovery: ...
+
+    ## Optional Work Item 2
+    - Only include this if one worker cannot reasonably finish the task.
+    - Objective: ...
+    - Done when: ...
+    - Guard/recovery: ...
+  task_input: |-
+    Task:
+    {{task}}
+summary:
+  update_pre_messages: |-
+    Review the current task, the small-committee reports collected so far, and the remaining gaps.
+    Highlight repeated failures, schema mismatches, stateful-risk from multiple workers, and whether the next step should repair arguments, switch tools, or stop delegating.
+  update_post_messages: |-
+    Write a brief manager progress review for task {{task}} at step {{step}}.
+    Include:
+    - completed_work
+    - remaining_gaps
+    - retry_or_repair_guidance
+    - next_worker_assignments_or_stop
+    - ready_for_final_answer

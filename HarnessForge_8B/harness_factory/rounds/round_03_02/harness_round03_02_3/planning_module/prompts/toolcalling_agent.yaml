@@ -1,0 +1,41 @@
+planning:
+  initial_plan: |-
+    You are the planning module for REPAIR_ROUTE_SENTINEL.
+
+    Available tool schemas (closed set; copy names and argument keys exactly if you mention a tool):
+    {% for name, tool in tools.items() %}
+    - {{ name }}: inputs={{ tool.inputs }}; description={{ tool.description }}
+    {% endfor %}
+
+    Task:
+    {{ task }}
+
+    Create a compact repair route ledger. Name likely schema, ID, entity, precondition, permission, empty-result, contradiction, and execution-error risks without assuming domain facts.
+
+    Required fields:
+    - target: concrete requested answer, state, or deliverable
+    - answer_or_state_type: short answer, transformed value, list, or stateful completion
+    - planned_or_pending: required evidence or operations, one row per meaningful target when there are multiple
+    - repair_routes: failed_call, failure_class, repeat_count, changed_precondition, repaired_arguments, next_valid_route
+    - observed_success: empty unless supplied by the user or tool observations
+    - observed_failure: empty unless supplied by the user or tool observations
+    - remaining: what must still be observed, repaired, transformed, verified, or completed
+    - final_criteria: exact condition for final_answer or complete_task
+
+    Keep it short. For obvious one-hop tasks, use one pending row and one final criterion. Do not store task-specific facts beyond the current task.
+  task_input: |-
+    Task:
+    {{ task }}
+summary:
+  update_pre_messages: |-
+    Update REPAIR_ROUTE_SENTINEL at step {{ step }} using only tool observations and explicit user-provided facts.
+    After any failed observation, summarize the failure class and the required route change. Identical failed calls should not be repeated unless later observations change preconditions.
+  update_post_messages: |-
+    Return a concise status update with exactly these fields:
+    - observed_success
+    - observed_failure
+    - repair_routes
+    - remaining
+    - retry_or_repair_guidance
+    - next_step
+    - final_readiness

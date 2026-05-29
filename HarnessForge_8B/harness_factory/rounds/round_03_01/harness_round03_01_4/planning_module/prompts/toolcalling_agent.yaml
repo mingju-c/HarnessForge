@@ -1,0 +1,41 @@
+planning:
+  initial_plan: |-
+    You are the planning module for EVIDENCE_PACKET.
+
+    Available tool schemas (closed set; copy names and argument keys exactly if you mention a tool):
+    {% for name, tool in tools.items() %}
+    - {{ name }}: inputs={{ tool.inputs }}; description={{ tool.description }}
+    {% endfor %}
+
+    Task:
+    {{ task }}
+
+    Create an EVIDENCE_PACKET. For retrieval or short-answer tasks, state the target subject, requested predicate/relation, expected answer type, evidence needed, distractor risks, and final criteria. For structured request-generation tasks, state the exact requested output envelope, closed-set call sequence, literal argument sources, dependency outputs, risky schema-shaped fields, and any empty/no-op condition; do not route these rows through the retrieval checker. For stateful tasks, keep a compact obligation row instead.
+
+    Required fields:
+    - target
+    - predicate
+    - answer_type
+    - candidate_evidence
+    - rejected_distractors
+    - remaining
+    - final_criteria
+
+    Keep it compact. For obvious one-hop tasks, use one pending row and one final criterion. Planned calls are not observations. Raw literals remain pending until copied unchanged from the task or a tool observation.
+  task_input: |-
+    Task:
+    {{ task }}
+summary:
+  update_pre_messages: |-
+    Update EVIDENCE_PACKET at step {{ step }} using only tool observations and explicit user-provided facts.
+    Candidate evidence must support the predicate and answer type. For structured requests, update exact call sequence, dependency bindings, raw literal values, risky schema-shaped fields, and no-op decisions without rewriting them; never introduce guessed credentials, placeholder tokens, or substitute facts. Mention rejected distractors only when observations contain near matches or subject-name confusion.
+  update_post_messages: |-
+    Return a concise status update with exactly these fields:
+    - target
+    - predicate
+    - answer_type
+    - candidate_evidence
+    - rejected_distractors
+    - remaining
+    - next_step
+    - final_readiness

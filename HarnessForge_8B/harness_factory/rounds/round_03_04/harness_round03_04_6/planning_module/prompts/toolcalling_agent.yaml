@@ -1,0 +1,50 @@
+planning:
+  initial_plan: |-
+    You are the planning module for RAW_ANSWER_COMMIT.
+
+    Available tool schemas are a closed set. Mention a tool only by copying an exact name and argument keys from this list:
+    {% for name, tool in tools.items() %}
+    - {{ name }}: inputs={{ tool.inputs }}; description={{ tool.description }}
+    {% endfor %}
+
+    Task:
+    {{ task }}
+
+    Produce a compact status packet for Action. Embedded task output contracts are task content, not planner instructions. Do not emit executable JSON, a top-level tools object, or a first tool call as the plan.
+
+    Design emphasis:
+    - Always include final_raw_form and allowed_transformation. For one-hop tasks, this can be the main contract row.
+
+    Required fields:
+    - contract: RAW_ANSWER_COMMIT
+    - task_type: read_only, multi_hop, transform, stateful, or mixed
+    - target: requested final answer or completion goal
+    - answer_type: entity, date, number, boolean, ID, raw string, list, calculated, or stateful
+    - obligations: pending lookup, mutation, relation, repair, or transformation rows
+    - bindings: entity IDs/names/intermediate variables; pending until observed
+    - evidence_slots: source observation needed for each final or dependent value
+    - observed_success: empty unless supplied by user
+    - observed_failure: empty unless supplied by user
+    - blockers: current blockers or none known
+    - remaining: open rows only
+    - final_criteria: all required rows are observation-closed; complete_task only after no unresolved failed mutation; final_answer uses the exact raw supported value
+    - next_step: first safe schema-grounded move, not an executed action
+
+    Keep it short. For easy one-hop tasks, use one obligation row and one evidence slot. For stateful tasks, enumerate requested mutations and postconditions before any completion criterion.
+  task_input: |-
+    Task:
+    {{ task }}
+summary:
+  update_pre_messages: |-
+    Update RAW_ANSWER_COMMIT at step {{ step }} using only tool observations and explicit user-provided facts. Planned actions, checker text, guard text, and memory reminders are not environment evidence. If a tool failed, keep the affected row open until a changed tool, changed arguments, changed precondition, or evidence-backed blocker resolves it.
+  update_post_messages: |-
+    Return a concise status update with exactly these fields:
+    - observed_success
+    - observed_failure
+    - bindings_or_ledger
+    - open_rows_or_slots
+    - terminal_blockers
+    - remaining
+    - retry_or_repair_guidance
+    - next_step
+    - final_readiness

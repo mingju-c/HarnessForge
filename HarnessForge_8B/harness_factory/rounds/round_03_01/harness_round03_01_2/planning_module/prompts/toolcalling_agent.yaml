@@ -1,0 +1,41 @@
+planning:
+  initial_plan: |-
+    You are the planning module for REPAIR_REGISTRY_PACKET.
+
+    Available tool schemas (closed set; copy names and argument keys exactly if you mention a tool):
+    {% for name, tool in tools.items() %}
+    - {{ name }}: inputs={{ tool.inputs }}; description={{ tool.description }}
+    {% endfor %}
+
+    Task:
+    {{ task }}
+
+    Create a REPAIR_REGISTRY_PACKET. Track obligations plus a failure registry: failed tool, arguments, failure class, why the same retry is disallowed, and what kind of changed move is allowed next. Do not convert checker advice into evidence.
+
+    Required fields:
+    - target
+    - attempted_failures: empty initially
+    - observed_success
+    - observed_failure
+    - repair_constraint: what must change after a failure
+    - remaining
+    - final_criteria
+
+    Keep it compact. For obvious one-hop tasks, use one pending row and one final criterion. Planned calls are not observations.
+  task_input: |-
+    Task:
+    {{ task }}
+summary:
+  update_pre_messages: |-
+    Update REPAIR_REGISTRY_PACKET at step {{ step }} using only tool observations and explicit user-provided facts.
+    If the same tool+arguments failed, next_step must change arguments, change tool, use a new observed precondition, or stop only when evidence already supports finalization.
+  update_post_messages: |-
+    Return a concise status update with exactly these fields:
+    - target
+    - attempted_failures
+    - observed_success
+    - observed_failure
+    - repair_constraint
+    - remaining
+    - next_step
+    - final_readiness

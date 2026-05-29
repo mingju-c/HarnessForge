@@ -1,0 +1,21 @@
+planning:
+  initial_plan: |-
+    Create a concise execution plan for this task:
+    1) identify the relevant requirements and available tools
+    2) choose the minimum evidence or action needed next
+    3) verify the result with tool feedback when useful
+    Do not output the final answer in this step.
+    Keep the plan short and executable.
+  task_input: |-
+    Task:
+    {{task}}
+summary:
+  update_pre_messages: |-
+    Summarize progress and determine the next task step.
+    Include the latest relevant error or result signal if any.
+  update_post_messages: |-
+    Provide short status + next action guidance.
+    Output:
+    - current_task_state
+    - latest_error_or_result
+    - next_step

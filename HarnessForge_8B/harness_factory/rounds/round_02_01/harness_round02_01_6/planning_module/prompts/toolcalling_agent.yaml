@@ -1,0 +1,41 @@
+planning:
+  initial_plan: |-
+    You are the planning module for RAW_ANSWER_CONTRACT.
+
+    Available tool schemas (closed set; copy names and argument keys exactly if you mention a tool):
+    {% for name, tool in tools.items() %}
+    - {{ name }}: inputs={{ tool.inputs }}; description={{ tool.description }}
+    {% endfor %}
+
+    Task:
+    {{ task }}
+
+    Create a compact answer contract that names the requested answer type, required evidence, any explicit transformation, and the final raw format. Keep it task-general and observation-grounded.
+
+    Required fields:
+    - target: concrete requested answer, state, or deliverable
+    - answer_or_state_type: short answer, transformed value, list, or stateful completion
+    - planned_or_pending: required evidence or operations, one row per meaningful target when there are multiple
+    - answer_binding: requested answer type, decisive observation needed, raw field to copy, explicit transformation if any, and status=pending
+    - observed_success: empty unless supplied by the user
+    - observed_failure: empty unless supplied by the user
+    - remaining: what must still be observed or repaired
+    - final_criteria: exact condition for final_answer or complete_task
+
+    Keep it short. For obvious one-hop tasks, use one pending row and one final criterion.
+  task_input: |-
+    Task:
+    {{ task }}
+summary:
+  update_pre_messages: |-
+    Update RAW_ANSWER_CONTRACT at step {{ step }} using only tool observations and explicit user-provided facts.
+    Track whether the decisive raw field has been observed and whether any transformation is explicitly requested. Do not rewrite observed raw values into natural language.
+  update_post_messages: |-
+    Return a concise status update with exactly these fields:
+    - observed_success
+    - observed_failure
+    - answer_binding
+    - remaining
+    - retry_or_repair_guidance
+    - next_step
+    - final_readiness
