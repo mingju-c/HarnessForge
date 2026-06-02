@@ -3,7 +3,7 @@
 # HarnessForge: Joint Harness and Policy Evolution for Adaptive Agent Systems
 
 [![Python](https://img.shields.io/badge/Python-3.10+-blue.svg)](https://www.python.org/)
-<!-- Optional: add paper/arXiv/framework links here. -->
+[![arXiv](https://img.shields.io/badge/arXiv-2606.01779-b31b1b.svg)](https://arxiv.org/abs/2606.01779)
 <!-- [![arXiv](https://img.shields.io/badge/arXiv-TBD-b31b1b.svg)](https://arxiv.org/) -->
 
 
@@ -376,6 +376,24 @@ Pass the generated bundle to your SFT stack, such as LLaMA-Factory or an interna
 cd ../LlamaFactory
 conda activate harnessforge-train
 llamafactory-cli train /path/to/harness_conditioned_sft.yaml
+```
+
+
+
+## Citation
+
+If you find HarnessForge helpful in your research, please kindly consider citing:
+
+```bibtex
+@misc{chen2026harnessforgejointharnesspolicy,
+      title={HarnessForge: Joint Harness and Policy Evolution for Adaptive Agent Systems}, 
+      author={Mingju Chen and Can Lv and Guibin Zhang and Heng Chang and Shiji Zhou},
+      year={2026},
+      eprint={2606.01779},
+      archivePrefix={arXiv},
+      primaryClass={cs.CL},
+      url={https://arxiv.org/abs/2606.01779}, 
+}
 ```
 
 ## Acknowledgments
