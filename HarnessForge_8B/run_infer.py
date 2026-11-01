@@ -70,7 +70,11 @@ from mixeddata import (
     extract_mixed_task,
     get_mixed_benchmark,
     write_mixeddata_metrics,
+    validate_mixeddata_scoring_items,
 )
+
+from mixeddata.mixed_reward import SCORING_VERSION
+from tools.rollout_provenance import build_rollout_provenance, validate_resume_provenance
 
 logging.basicConfig(
     level=logging.INFO,
@@ -1288,6 +1292,8 @@ def process_item(
             "toolhop_action_count": eval_result.get("action_count"),
             "tool_call_count": eval_result.get("tool_call_count"),
             "score": eval_result.get("score"),
+            "answer_f1": eval_result.get("answer_f1"),
+            "scoring_version": eval_result.get("scoring_version"),
             "taubench_done": eval_result.get("taubench_done"),
             "taubench_reward": eval_result.get("taubench_reward"),
             "taubench_domain": eval_result.get("taubench_domain"),
@@ -1392,6 +1398,8 @@ def process_item(
             "toolhop_action_count": None,
             "tool_call_count": None,
             "score": None,
+            "answer_f1": None,
+            "scoring_version": SCORING_VERSION if dataset_type == "mixeddata" else None,
             "taubench_done": None,
             "taubench_reward": 0.0 if dataset_type == "taubench" else None,
             "taubench_domain": extra_fields.get("taubench_domain"),
@@ -1577,6 +1585,11 @@ def main(args):
     elif args.sample_num is not None:
         data = data[:args.sample_num]
 
+    if dataset_type == "mixeddata":
+        validate_mixeddata_scoring_items(data)
+
+    rollout_provenance = build_rollout_provenance(args, infile, task_llm_config.model) if dataset_type == "mixeddata" else None
+
     if not args.outfile:
         base_out_dir = args.output_dir or "./output"
         base_name = benchmark_cfg["benchmark"] if benchmark_cfg else os.path.splitext(os.path.basename(infile))[0]
@@ -1597,6 +1610,14 @@ def main(args):
         out_data = read_jsonl(args.outfile)
     except Exception:
         out_data = []
+
+    if dataset_type == "mixeddata" and any(row.get("scoring_version") != SCORING_VERSION for row in out_data):
+        raise ValueError(
+            "Existing results use a different scoring version. Use a new --outfile or re-score the saved trajectories."
+        )
+
+    if rollout_provenance is not None:
+        validate_resume_provenance(out_data, rollout_provenance)
 
     done_keys = set()
     for item in out_data:
@@ -1652,6 +1673,8 @@ def main(args):
 
             if result:
                 result = make_json_serializable(result)
+                if rollout_provenance is not None:
+                    result["provenance"] = dict(rollout_provenance)
                 results.append(result)
                 safe_write(result)
                 safe_save_task(result)
@@ -1907,6 +1930,13 @@ def build_arg_parser() -> argparse.ArgumentParser:
         type=str,
         default=os.environ.get("MODEL_ADAPTER") or os.environ.get("LORA_ADAPTER"),
         help='Optional adapter/checkpoint path or id recorded in the harness pool registry.',
+    )
+
+    parser.add_argument(
+        '--data-split',
+        choices=('unspecified', 'evolution', 'train', 'validation', 'test'),
+        default='unspecified',
+        help='Declared source split saved with mixed rollouts; SFT accepts only evolution/train.',
     )
 
     return parser

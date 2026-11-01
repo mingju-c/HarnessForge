@@ -1,0 +1,10 @@
+{
+  "min_scores": {
+    "toolhop": 1.0,
+    "searchqa": 1.0,
+    "envscaler": 0.9
+  },
+  "sample_mode": "prefix",
+  "eval_ratio": 0.05,
+  "seed": 42
+}

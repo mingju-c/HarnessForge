@@ -8,6 +8,7 @@ from .evaluation import (
     evaluate_mixeddata_item,
     summarize_mixeddata_results,
     write_mixeddata_metrics,
+    validate_mixeddata_scoring_items,
 )
 
 __all__ = [
@@ -18,4 +19,5 @@ __all__ = [
     "get_mixed_benchmark",
     "summarize_mixeddata_results",
     "write_mixeddata_metrics",
+    "validate_mixeddata_scoring_items",
 ]

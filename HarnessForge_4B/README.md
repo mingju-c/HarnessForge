@@ -104,16 +104,19 @@ Production artifacts are written under `harness_production/<round_id>/`. Generat
 
 ## Policy Alignment
 
-Trajectory cleaning and SFT-data construction scripts live in `tools/`. Use the shared `../LlamaFactory/` directory for SFT launch/configuration; model weights, checkpoints, and generated training data stay outside this workspace:
+Use `tools/prepare_mixed_sft.py` for the new shared mixed-task SFT pipeline.
+Follow the [collection, manifest, configuration, and training instructions](../docs/mixed_sft.md).
+It requires versioned scores and explicit evolution/train source declarations,
+then produces cleaned train/eval data, trainer registration, and an audit.
 
-```text
-tools/prepare_toolhop_rollout_sft.py
-tools/prepare_trainer_harness_data.py
-tools/create_mixeddata_evolution_splits.py
-tools/split_trainer_dataset_bundle.py
-```
-
-The repo prepares trainer-ready data. Model training itself is expected to run in your SFT stack, for example LLaMA-Factory or an internal trainer.
+Round-specific development/test cleaners have been removed. The
+[tool directory index](../docs/tools_index.md) lists retained utilities and their purposes.
+The standalone ToolHop and generic trainer-data utilities remain available for
+other workflows; do not run them after the shared mixed-task cleaner to rebuild
+training data from raw traces. Model training runs in the separate SFT
+stack, such as `../LlamaFactory/`. The default follows the maintainer-specified final rules: QA score/answer
+correctness both 1; EnvScaler reward at least 0.9 and done. Each build uses
+one source round and one harness-policy pair.
 
 ## Data And Git Hygiene
 

@@ -1,0 +1,10 @@
+{
+  "round_id": "round01",
+  "harness": "rounds.round_01.harness_round01_2",
+  "policy_id": "policy_round00",
+  "dataset_id": "mixed_evolution_round01",
+  "data_split": "evolution",
+  "sources": [
+    "../../HarnessForge_4B/output/policy_alignment/round01_harness2/results.jsonl"
+  ]
+}

@@ -1,0 +1,34 @@
+# New reference template, not the historical training configuration.
+# Replace paths and choose settings for the actual model and hardware.
+model_name_or_path: /absolute/path/to/parent_policy
+stage: sft
+do_train: true
+finetuning_type: lora
+lora_target: all
+lora_rank: 16
+
+dataset_dir: /absolute/path/to/data/sft/round01_harness2_v2
+dataset: round01_harness2_train
+eval_dataset: round01_harness2_eval
+template: qwen3_nothink
+cutoff_len: 8192  # Inspect token lengths/truncation before choosing this limit.
+train_on_prompt: false
+mask_history: false  # Set true when using final_prefix.json.
+val_size: 0
+packing: false
+
+output_dir: /absolute/path/to/new_adapter_output
+overwrite_output_dir: false
+per_device_train_batch_size: 1
+gradient_accumulation_steps: 8
+learning_rate: 1.0e-5
+num_train_epochs: 1.0
+lr_scheduler_type: cosine
+warmup_ratio: 0.1
+bf16: true  # Requires compatible hardware.
+logging_steps: 10
+save_strategy: epoch
+eval_strategy: epoch
+per_device_eval_batch_size: 1
+report_to: none
+seed: 42

@@ -231,7 +231,7 @@ def summarize_results(rows: list[dict[str, Any]]) -> dict[str, Any]:
     completion_token_values = [row.get("metrics", {}).get("completion_tokens") for row in rows]
     api_call_values = [row.get("metrics", {}).get("api_calls") for row in rows]
 
-    return {
+    metrics = {
         "total_tasks": total,
         "successful": successful,
         "errors": errors,
@@ -253,6 +253,26 @@ def summarize_results(rows: list[dict[str, Any]]) -> dict[str, Any]:
         "total_tokens": sum(float(value or 0) for value in token_values),
         "total_api_calls": sum(float(value or 0) for value in api_call_values),
     }
+    if any(row.get("mixed_benchmark") or row.get("score") is not None for row in rows):
+        scores = []
+        versions = set()
+        for row in rows:
+            raw_score = row.get("score")
+            if raw_score is None and row.get("status") != "error":
+                raise ValueError("A non-error result is missing its task score; re-evaluate this result.")
+            score = 0.0 if row.get("status") == "error" else float(raw_score or 0.0)
+            if not math.isfinite(score) or not 0.0 <= score <= 1.0:
+                raise ValueError(f"Invalid task score: {raw_score!r}")
+            scores.append(score)
+            versions.add(str(row.get("scoring_version") or "legacy_unversioned"))
+        if len(versions) > 1:
+            raise ValueError(f"Cannot mix scoring versions: {sorted(versions)}. Re-evaluate old results.")
+        metrics.update(
+            avg_score=sum(scores) / total,
+            score_aggregation="micro",
+            scoring_version=next(iter(versions)),
+        )
+    return metrics
 
 
 def clean_metrics(metrics: dict[str, Any]) -> dict[str, Any]:
@@ -276,6 +296,14 @@ def merge_summary_metrics(
     metrics = dict(result_summary)
     benchmark_summary = benchmark_summary or {}
     report_summary = report_summary or {}
+
+    if "avg_score" in benchmark_summary:
+        summary_version = benchmark_summary.get("scoring_version") or "legacy_unversioned"
+        if metrics.get("scoring_version", summary_version) != summary_version:
+            raise ValueError("Results and benchmark summary use different scoring versions.")
+        metrics["avg_score"] = benchmark_summary["avg_score"]
+        metrics["scoring_version"] = summary_version
+        metrics["score_aggregation"] = benchmark_summary.get("score_aggregation", "micro")
 
     if "answer_correct" in benchmark_summary:
         metrics["accuracy"] = benchmark_summary.get("answer_correct")
@@ -315,6 +343,18 @@ def merge_summary_metrics(
 
 
 def compute_primary_score(metrics: dict[str, Any]) -> float | None:
+    """Mixed task performance is the micro-average, with costs kept separate."""
+    if "avg_score" in metrics:
+        score = float(metrics["avg_score"])
+        if not math.isfinite(score) or not 0.0 <= score <= 1.0:
+            raise ValueError(f"Invalid mixed performance: {score!r}")
+        return score
+    # Preserve the standalone legacy benchmark workflow. The paper selector
+    # requires an explicit scoring version, so these scores cannot pass as Perf.
+    return compute_legacy_primary_score(metrics)
+
+
+def compute_legacy_primary_score(metrics: dict[str, Any]) -> float | None:
     accuracy = metrics.get("accuracy")
     if accuracy is None:
         accuracy = metrics.get("api_call_accuracy")
@@ -410,6 +450,8 @@ def record_run_from_summary(
         benchmark_summary=benchmark_summary,
         report_summary=report_summary,
     )
+    if dataset_type == "mixeddata" and "avg_score" not in metrics:
+        raise ValueError("MixedData registration requires per-task scores or an avg_score summary.")
     resolved_run_id = run_id or make_run_id(
         experiment=experiment,
         round_id=round_id,
@@ -451,6 +493,9 @@ def record_run_from_summary(
         "model": model_alias or model_name,
         "adapter": model_adapter,
         "primary_score": metrics.get("primary_score"),
+        "avg_score": metrics.get("avg_score"),
+        "scoring_version": metrics.get("scoring_version"),
+        "score_aggregation": metrics.get("score_aggregation"),
         "accuracy": metrics.get("accuracy"),
         "valid_answer_rate": metrics.get("valid_answer_rate"),
         "avg_tool_calls": metrics.get("avg_tool_calls"),

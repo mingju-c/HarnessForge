@@ -96,7 +96,7 @@ def get_mixed_benchmark(sample: dict[str, Any] | None) -> str:
         text = str(value or "").lower()
         if "envscaler" in text:
             return "envscaler"
-        if "searchqa" in text:
+        if "searchqa" in text or text in {"nq", "hotpotqa", "2wikimultihopqa", "offline"}:
             return "searchqa"
         if "toolhop" in text:
             return "toolhop"

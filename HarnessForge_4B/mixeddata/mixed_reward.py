@@ -4,12 +4,17 @@ import ast
 import json
 import re
 import string
+from collections import Counter
 from typing import Any
 
 
+SCORING_VERSION = "paper_c1_v1"
+
 _REWARD_EXTRA_DEFAULTS: dict[str, Any] = {
+    "scoring_version": SCORING_VERSION,
     "score": 0.0,
     "answer_correct": 0.0,
+    "answer_f1": 0.0,
     "subem": 0.0,
     "path_score": 0.0,
     "tool_call_count": 0,
@@ -103,6 +108,38 @@ def _subem(prediction: str, golden_answers: list[str]) -> float:
     return float(any(normalize_answer(answer) in normalized_prediction for answer in golden_answers))
 
 
+def _answer_f1(prediction: str, golden_answers: list[str]) -> float:
+    """Normalized token-multiset F1, taking the best accepted reference answer."""
+    predicted_tokens = normalize_answer(prediction).split()
+    if not predicted_tokens:
+        return 0.0
+    best = 0.0
+    for answer in golden_answers:
+        gold_tokens = normalize_answer(answer).split()
+        if not gold_tokens:
+            continue
+        overlap = sum((Counter(predicted_tokens) & Counter(gold_tokens)).values())
+        best = max(best, 2.0 * overlap / (len(predicted_tokens) + len(gold_tokens)))
+    return best
+
+
+def toolhop_subtask_answers(ground_truth: Any, extra_info: dict[str, Any] | None) -> list[str]:
+    """Require the original subgoal labels; a final answer cannot supply a path."""
+    labels = _maybe_literal((extra_info or {}).get("sub_task"))
+    truth = _maybe_literal(ground_truth)
+    if labels is None and isinstance(truth, dict):
+        labels = _maybe_literal(truth.get("sub_task"))
+    if not isinstance(labels, dict) or not labels:
+        raise ValueError(
+            "Paper ToolHop scoring requires a non-empty sub_task mapping in the item, "
+            "extra_info, or ground_truth. Preserve the original ToolHop subgoal labels."
+        )
+    answers = [normalize_answer(value) if value is not None else "" for value in labels.values()]
+    if not all(answers):
+        raise ValueError("ToolHop sub_task labels must contain non-empty normalized answers.")
+    return answers
+
+
 def _extract_json_answer(solution_str: str) -> str:
     decoder = json.JSONDecoder()
     for match in reversed(list(re.finditer(r"\{", solution_str))):
@@ -119,6 +156,8 @@ def _extract_json_answer(solution_str: str) -> str:
 
 
 def _extract_answer(solution_str: str) -> str:
+    # Tool-returned JSON can contain an "answer" field, but is not a final answer.
+    solution_str = re.sub(r"<tool_response>.*?</tool_response>", "", solution_str, flags=re.DOTALL)
     answer_tag_matches = re.findall(r"<answer>\s*(.*?)\s*</answer>", solution_str, flags=re.DOTALL | re.IGNORECASE)
     if answer_tag_matches:
         return answer_tag_matches[-1].strip()
@@ -154,9 +193,24 @@ def _score_answer_task(solution_str: str, ground_truth: Any, extra_info: dict[st
     }
 
 
+def _score_toolhop(solution_str: str, ground_truth: Any, extra_info: dict[str, Any] | None) -> dict[str, Any]:
+    result = _score_answer_task(solution_str, ground_truth, extra_info)
+    subtask_answers = toolhop_subtask_answers(ground_truth, extra_info)
+    # Only tool observations count as intermediate evidence, never the final answer.
+    observations = re.findall(r"<tool_response>\s*(.*?)\s*</tool_response>", solution_str, flags=re.DOTALL)
+    observed_text = normalize_answer("\n".join(observations))
+    solved = sum(answer in observed_text for answer in subtask_answers)
+    result["path_score"] = solved / len(subtask_answers)
+    result["solved_subtasks"] = solved
+    result["subtask_count"] = len(subtask_answers)
+    result["score"] = 0.5 * result["answer_correct"] + 0.5 * result["path_score"]
+    return result
+
+
 def _score_searchqa(solution_str: str, ground_truth: Any, extra_info: dict[str, Any] | None) -> dict[str, Any]:
     result = _score_answer_task(solution_str, ground_truth, extra_info)
-    result["score"] = result["answer_correct"]
+    result["answer_f1"] = _answer_f1(result["pred_answer"], _gold_answers(ground_truth, extra_info))
+    result["score"] = result["answer_f1"]
     has_search = "<information>" in solution_str or '"name": "search"' in solution_str or '"name":"search"' in solution_str
     result["used_search"] = float(bool(has_search))
     return result
@@ -203,6 +257,7 @@ def _finalize_result(result: dict[str, Any], benchmark: str) -> dict[str, Any]:
     for key in (
         "score",
         "answer_correct",
+        "answer_f1",
         "subem",
         "path_score",
         "has_valid_answer",
@@ -240,8 +295,8 @@ def compute_score(
     extra_info = extra_info or {}
     benchmark = str(extra_info.get("benchmark") or data_source or "").lower()
     if "toolhop" in benchmark:
-        return _finalize_result(_score_answer_task(solution_str, ground_truth, extra_info), "toolhop")
-    if "searchqa" in benchmark or benchmark in {"nq", "hotpotqa", "offline"}:
+        return _finalize_result(_score_toolhop(solution_str, ground_truth, extra_info), "toolhop")
+    if "searchqa" in benchmark or benchmark in {"nq", "hotpotqa", "2wikimultihopqa", "offline"}:
         return _finalize_result(_score_searchqa(solution_str, ground_truth, extra_info), "searchqa")
     if "envscaler" in benchmark:
         return _finalize_result(_score_envscaler(extra_info), "envscaler")

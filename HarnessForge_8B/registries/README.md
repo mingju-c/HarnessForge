@@ -37,3 +37,28 @@ python tools/harness_pool_registry.py topk \
 
 `run_infer.py` can also update this registry directly when called with
 `--record-harness-registry`.
+
+## Mixed evolution performance
+
+For `paper_c1_v1` mixed-data runs, `primary_score` is the micro-average
+`avg_score`, including EnvScaler completion rewards. QA-only fields remain
+unchanged. Accuracy, valid-answer rate, path score, and tool-call counts do not
+add bonuses or penalties to this mixed performance value.
+
+The default `tools/half_select_harnesses.py` retains six independent objectives:
+maximize `primary_score`, `accuracy`, `valid_answer_rate`; minimize `avg_tokens`,
+`avg_elapsed_time`, `avg_tool_calls`. These extra objectives are not weighted
+components of `Perf` and are not equivalent to the paper's three-objective
+vector. To select with three objectives, explicitly pass:
+
+```text
+--quality-metric primary_score --cost-metric avg_tokens --cost-metric avg_elapsed_time
+```
+
+Run records and their `latest` views retain `scoring_version`,
+`score_aggregation`, and `avg_score`. Selection outputs record the actual
+objectives. Historical unversioned scores must be re-evaluated before selection
+with the corrected scoring version. Do not relabel old scores or overwrite the
+published archives to imply they used the corrected evaluator. See
+[the task scorer](../mixeddata/mixed_reward.py) for required ToolHop labels and
+[the mixed-data evaluator](../mixeddata/evaluation.py) for aggregation details.

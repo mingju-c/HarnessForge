@@ -47,8 +47,23 @@ def collect_candidates(registry: dict[str, Any], args: argparse.Namespace) -> li
             if args.experiment and run.get("experiment") != args.experiment:
                 continue
             metrics = run.get("metrics") or {}
+            version = metrics.get("scoring_version") or "legacy_unversioned"
+            if version != args.scoring_version:
+                raise ValueError(
+                    f"{harness}/{run.get('run_id')} uses {version}, expected {args.scoring_version}. "
+                    "Re-evaluate historical runs before selection with the corrected scoring version."
+                )
+            if version == "paper_c1_v1":
+                perf = as_float(metrics.get("avg_score"))
+                primary_score = as_float(metrics.get("primary_score"))
+                if (perf is None or primary_score is None or metrics.get("score_aggregation") != "micro"
+                        or not math.isclose(perf, primary_score, abs_tol=1e-6)):
+                    raise ValueError(f"{harness}/{run.get('run_id')} must record micro avg_score == primary_score.")
             quality = {name: as_float(metrics.get(name)) for name in args.quality_metric}
             cost = {name: as_float(metrics.get(name)) for name in args.cost_metric}
+            missing = [name for name, value in {**quality, **cost}.items() if value is None]
+            if missing:
+                raise ValueError(f"{harness}/{run.get('run_id')} is missing finite selection metrics: {missing}")
             primary = quality.get(args.primary_metric)
             if primary is None:
                 continue
@@ -115,25 +130,44 @@ def half_select(rows: list[dict[str, Any]], args: argparse.Namespace) -> list[di
     return selected[:target]
 
 
-def main() -> None:
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Select the Pareto-competitive top half of evaluated harness candidates from harness_pool.yaml.")
     parser.add_argument("--registry-file", type=Path, default=Path("registries/harness_pool.yaml"))
     parser.add_argument("--round", type=str, default=None)
     parser.add_argument("--dataset", type=str, default=None)
     parser.add_argument("--experiment", type=str, default=None)
     parser.add_argument("--primary-metric", type=str, default="primary_score")
-    parser.add_argument("--quality-metric", action="append", default=["primary_score", "accuracy", "valid_answer_rate"])
-    parser.add_argument("--cost-metric", action="append", default=["avg_tokens", "avg_elapsed_time", "avg_tool_calls"])
+    parser.add_argument("--quality-metric", action="append", help="Override quality objectives; repeat for multiple objectives.")
+    parser.add_argument("--cost-metric", action="append", help="Override cost objectives; repeat for multiple objectives.")
+    parser.add_argument("--scoring-version", default="paper_c1_v1", help="Required scoring version; historical scores require an explicit override.")
     parser.add_argument("--keep-fraction", type=float, default=0.5)
     parser.add_argument("--min-survivors", type=int, default=2)
     parser.add_argument("--output", type=Path, required=True)
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
+    # Preserve the released extended objective set. The task-aware primary
+    # score fixes EnvScaler aggregation; explicit overrides select three goals.
+    args.quality_metric = args.quality_metric or ["primary_score", "accuracy", "valid_answer_rate"]
+    args.cost_metric = args.cost_metric or ["avg_tokens", "avg_elapsed_time", "avg_tool_calls"]
+    if args.primary_metric not in args.quality_metric:
+        parser.error("--primary-metric must be included in --quality-metric")
+    if not 0 < args.keep_fraction <= 1 or args.min_survivors < 1:
+        parser.error("--keep-fraction must be in (0, 1] and --min-survivors must be positive")
+    return args
 
+
+def main() -> None:
+    args = parse_args()
     registry = load_yaml(args.registry_file)
     candidates = collect_candidates(registry, args)
+    if not candidates:
+        raise ValueError("No evaluated candidates match the requested filters.")
     selected = half_select(candidates, args)
     payload = {
         "selection_rule": "pareto_half_selection",
+        "scoring_version": args.scoring_version,
+        "primary_metric": args.primary_metric,
+        "quality_metrics": args.quality_metric,
+        "cost_metrics": args.cost_metric,
         "registry_file": str(args.registry_file),
         "round": args.round,
         "dataset": args.dataset,
